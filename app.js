@@ -1,4 +1,4 @@
-import { lookupBookMetadata, makeMetadataPatch, missingFields } from './metadata.js';
+import { lookupBookMetadata, makeMetadataPatch, missingFields, searchBookCatalog, lookupSelectedCatalogBook } from './metadata.js';
 const CONFIG=window.BOOKSHELF_CONFIG||{},SUPABASE_JS_URL='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/+esm',LOCAL_KEY='meine-bibliothek-v02';
 const CURRENT_YEAR=new Date().getFullYear();
 const STATUS_LABELS={all:'Alle',reading:'Lese ich',finished:'Gelesen',unread:'Ungelesen',wishlist:'Wunschliste',abandoned:'Abgebrochen'},FORMAT_LABELS={ebook:'E-Book',print:'Print',audiobook:'Hörbuch'},GENRE_COLORS=['#8b4d28','#c47a4c','#d7a86e','#8a6c57','#b69782','#d4c1ad','#6c5445','#a97758'],MONTHS=['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez'];
@@ -13,7 +13,7 @@ const demoBooks=[
 {id:'88888888-8888-4888-8888-888888888888',title:'Thinking, Fast and Slow',author:'Daniel Kahneman',isbn:'9780374533557',cover_url:'https://covers.openlibrary.org/b/isbn/9780374533557-L.jpg',status:'unread',rating:null,pages:499,current_page:0,published_year:2011,started_at:null,finished_at:null,format:'ebook',language:'Englisch',genres:['Sachbuch','Psychologie'],notes:'',created_at:'2026-09-02T09:00:00Z'},
 {id:'99999999-9999-4999-8999-999999999999',title:'The Nickel Boys',author:'Colson Whitehead',isbn:'9780385537070',cover_url:'https://covers.openlibrary.org/b/isbn/9780385537070-L.jpg',status:'finished',rating:5,pages:224,current_page:224,published_year:2019,started_at:'2026-09-04',finished_at:'2026-09-12',format:'ebook',language:'Englisch',genres:['Roman','Geschichte'],notes:'',created_at:'2026-09-04T09:00:00Z'},
 {id:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',title:'The Song of Achilles',author:'Madeline Miller',isbn:'9780062060624',cover_url:'https://covers.openlibrary.org/b/isbn/9780062060624-L.jpg',status:'wishlist',rating:null,pages:378,current_page:0,published_year:2011,started_at:null,finished_at:null,format:'ebook',language:'Englisch',genres:['Roman','Historisch'],notes:'',created_at:'2026-09-27T09:00:00Z'}];
-const state={books:[],activeFilter:'all',activeFormat:'all',activeAuthor:'all',searchQuery:'',sort:'recent',currentView:'library',statsYear:CURRENT_YEAR,activeBookId:null,supabase:null,user:null,syncMode:'local',searchAbort:null,quotes:[],quoteTargetBookId:null,metadataBatchCursor:0,metadataResult:null,metadataBookId:null,metadataCoverChoice:null,metadataBusy:false,metadataBatchBusy:false};
+const state={books:[],activeFilter:'all',activeFormat:'all',activeAuthor:'all',searchQuery:'',sort:'recent',currentView:'library',statsYear:CURRENT_YEAR,activeBookId:null,supabase:null,user:null,syncMode:'local',searchAbort:null,quotes:[],quoteTargetBookId:null,metadataBatchCursor:0,metadataResult:null,metadataBookId:null,metadataCoverChoice:null,metadataBusy:false,metadataBatchBusy:false,metadataManualResults:[],metadataManualQuery:'',metadataManualBusy:false,metadataManualSearched:false,metadataManualError:'',metadataSelectedManually:false,metadataReplaceIdentity:false,metadataManualSeq:0};
 const $=(s,r=document)=>r.querySelector(s),$$=(s,r=document)=>[...r.querySelectorAll(s)],esc=(v='')=>String(v).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])),safeDate=v=>v?new Date(`${v}T12:00:00`):null,fmtDate=v=>v?new Intl.DateTimeFormat('de-DE',{day:'numeric',month:'long',year:'numeric'}).format(safeDate(v)):'–',uuid=()=>{if(typeof crypto.randomUUID==='function')return crypto.randomUUID();const a=new Uint8Array(16);crypto.getRandomValues(a);a[6]=(a[6]&15)|64;a[8]=(a[8]&63)|128;const h=[...a].map(x=>x.toString(16).padStart(2,'0')).join('');return[h.slice(0,8),h.slice(8,12),h.slice(12,16),h.slice(16,20),h.slice(20)].join('-')};
 function loadLocal(){try{const x=JSON.parse(localStorage.getItem(LOCAL_KEY)||'null');if(Array.isArray(x)){state.books=x}else{state.books=CONFIG.useDemoData===false?[]:structuredClone(demoBooks)}}catch{state.books=CONFIG.useDemoData===false?[]:structuredClone(demoBooks)}}function saveLocal(){localStorage.setItem(LOCAL_KEY,JSON.stringify(state.books))}function toast(m){const e=$('#toast');e.textContent=m;e.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>e.classList.remove('show'),2200)}
 async function initSupabase(){if(!CONFIG.supabaseUrl||!CONFIG.supabasePublishableKey){updateSyncCard();return}try{const{createClient}=await import(SUPABASE_JS_URL);state.supabase=createClient(CONFIG.supabaseUrl,CONFIG.supabasePublishableKey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});const{data}=await state.supabase.auth.getSession();state.user=data.session?.user||null;state.supabase.auth.onAuthStateChange((_e,s)=>{state.user=s?.user||null;updateSyncCard()});if(state.user)await pullFromSupabase();updateSyncCard()}catch(e){console.warn(e);state.syncMode='local';updateSyncCard()}}
@@ -170,25 +170,83 @@ async function autoCompleteNewBook(book){
   }catch(err){console.debug('Metadaten später ergänzen',err)}
 }
 function metadataStatus(message){const el=$('#metadataBatchStatus');if(el)el.textContent=message;}
+function manualMetadataSearchHTML(){
+  const results=state.metadataManualResults||[];
+  let listing='';
+  if(state.metadataManualBusy)listing='<p class="hint" role="status">Suche in Open Library und Google Books …</p>';
+  else if(state.metadataManualError)listing=`<p class="metadata-manual-warning" role="status">${esc(state.metadataManualError)}</p>`;
+  else if(state.metadataManualSearched&&!results.length)listing='<p class="hint">Kein Treffer. Probiere einen anderen Namen, den vollständigen Titel oder eine ISBN.</p>';
+  else if(results.length){
+    listing=`<p class="muted small metadata-result-count">${results.length} Treffer – tippe auf das passende Buch:</p>`+`<div class="metadata-search-results">${results.map((c,i)=>`<button class="metadata-search-result" data-meta-action="choose-candidate" data-candidate-index="${i}" type="button">
+      <span class="metadata-result-cover">${c.cover_url?`<img src="${esc(c.cover_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`: '<span aria-hidden="true">📖</span>'}</span>
+      <span class="metadata-result-text"><strong>${esc(c.title)}</strong><span>${esc(c.author||'Autor unbekannt')}</span><small>${esc([c.published_year||'',c.source].filter(Boolean).join(' · '))}</small></span>
+      <span class="metadata-result-arrow" aria-hidden="true">›</span></button>`).join('')}</div>`;
+  }
+  return `<section class="metadata-manual-section"><h3>Selbst nach einem Buch suchen</h3>
+    <p class="muted small">Titel, Autor oder ISBN – auch ein Teil des Namens reicht, z. B. „Wengro“.</p>
+    <form id="metadataManualForm" class="metadata-search-form" role="search">
+      <label class="sr-only" for="metadataManualInput">Buchtitel, Autor oder ISBN</label>
+      <input id="metadataManualInput" type="search" autocomplete="off" placeholder="z. B. Wengro, Anfänge …" value="${esc(state.metadataManualQuery)}" ${state.metadataManualBusy?'disabled':''}>
+      <button class="small-button" type="submit" ${state.metadataManualBusy?'disabled':''}>Suchen</button>
+    </form>${listing}</section>`;
+}
+function metadataPatchForCurrent(book,result){
+  const selected=state.metadataCoverChoice;
+  const patch=makeMetadataPatch(book,result,{selectedCover:selected,replaceCover:!!selected&&selected!==book.cover_url});
+  if(state.metadataSelectedManually&&state.metadataReplaceIdentity){
+    const newTitle=String(result.matched_title||'').trim();
+    const newAuthor=String(result.matched_author||'').trim();
+    if(newTitle&&newTitle!==book.title)patch.title=newTitle;
+    if(newAuthor&&newAuthor!==book.author)patch.author=newAuthor;
+  }
+  return patch;
+}
 function previewMetadata(){
   const book=state.books.find(b=>b.id===state.metadataBookId),result=state.metadataResult,box=$('#metadataContent');
   if(!book||!box)return;
-  if(!result){box.innerHTML=`<div class="sheet-header"><div><p class="eyebrow">Buchdaten</p><h2>${esc(book.title)}</h2></div><button class="icon-button" data-action="close-overlays" aria-label="Schließen">×</button></div><p class="hint">${state.metadataBusy?'Wir suchen Cover und Beschreibungen …':'Keine eindeutigen Buchdaten gefunden. Du kannst Angaben weiterhin manuell bearbeiten.'}</p>${!state.metadataBusy?'<button class="small-button" data-meta-action="edit">Manuell bearbeiten</button>':''}`;return;}
+  const header=`<div class="sheet-header"><div><p class="eyebrow">Buchdaten vervollständigen</p><h2>${esc(book.title)}</h2><p class="muted">${esc(book.author||'')}</p></div><button class="icon-button" data-action="close-overlays" aria-label="Schließen">×</button></div>`;
+  const search=manualMetadataSearchHTML();
+  if(!result){box.innerHTML=header+`<p class="hint">${state.metadataBusy?'Wir suchen Cover und Beschreibungen …':'Keine eindeutigen Buchdaten gefunden. Du kannst selbst suchen oder Angaben manuell bearbeiten.'}</p>`+search+(!state.metadataBusy?'<button class="small-button metadata-edit-fallback" data-meta-action="edit">Angaben selbst eingeben</button>':'');return;}
   const selected=state.metadataCoverChoice;
   const choices=result.variants||[];
-  const patch=makeMetadataPatch(book,result,{selectedCover:selected,replaceCover:!!selected&&selected!==book.cover_url});
-  const entries=[['cover_url','Cover'],['description','Kurzinhalt'],['isbn','ISBN'],['pages','Seitenzahl'],['published_year','Erscheinungsjahr'],['language','Sprache']];
+  const patch=metadataPatchForCurrent(book,result);
+  const entries=[['title','Titel'],['author','Autoren'],['cover_url','Cover'],['description','Kurzinhalt'],['isbn','ISBN'],['pages','Seitenzahl'],['published_year','Erscheinungsjahr'],['language','Sprache']];
   const labels=entries.filter(([key])=>patch[key]!==undefined).map(([key,label])=>`<li><strong>${label}</strong><span>${key==='description'?'Kurze Inhaltsangabe':key==='cover_url'?'Ausgewähltes Cover':esc(String(patch[key]))}</span></li>`).join('');
-  box.innerHTML=`<div class="sheet-header"><div><p class="eyebrow">Buchdaten vervollständigen</p><h2>${esc(book.title)}</h2><p class="muted">${esc(book.author||'')}</p></div><button class="icon-button" data-action="close-overlays" aria-label="Schließen">×</button></div>
-    <p class="hint">Gefunden: ${esc(result.matched_title||'')} · ${esc(result.matched_author||'')}. Vorhandene Angaben bleiben erhalten; nur ein bewusst ausgewähltes Cover wird ersetzt.</p>
+  const identity=state.metadataSelectedManually?`<label class="metadata-author-override"><input type="checkbox" id="metadataReplaceIdentity" ${state.metadataReplaceIdentity?'checked':''}><span>Auch Titel und Autoren aus dem ausgewählten Treffer übernehmen <small>(nur auf Wunsch; wichtig bei mehreren Autoren)</small></span></label>`:'';
+  box.innerHTML=header+search+`<div class="metadata-proposal"><p class="hint">${state.metadataSelectedManually?'Du hast gewählt':'Automatisch gefunden'}: <strong>${esc(result.matched_title||'')}</strong> · ${esc(result.matched_author||'')}. Deine Lesedaten, Bewertungen, Notizen und Zitate bleiben unverändert.</p>
+    ${identity}
     ${choices.length?`<h3 class="metadata-label">Cover auswählen <span>(optional)</span></h3><div class="metadata-cover-grid"><button class="metadata-cover-choice ${!selected?'selected':''}" data-meta-action="keep-cover"><span class="metadata-cover-old">${book.cover_url?coverImg(book):'—'}</span><small>${book.cover_url?'Bisheriges Cover':'Kein Cover ändern'}</small></button>${choices.slice(0,6).map((c,i)=>`<button class="metadata-cover-choice ${selected===c.url?'selected':''}" data-meta-action="select-cover" data-cover-index="${i}"><img src="${esc(c.url)}" alt="Cover-Variante ${i+1}" loading="lazy"><small>${esc(c.label||'Ausgabe')}</small></button>`).join('')}</div>`:''}
     <h3 class="metadata-label">Kurzinhalt</h3><div class="metadata-description">${esc(book.description||result.description||'Keine Beschreibung gefunden.')}</div>${result.description_source?`<p class="muted small">Quelle: ${esc(result.description_source)}${book.description?' (eigene vorhandene Beschreibung bleibt)':''}</p>`:''}
-    <h3 class="metadata-label">Was wird ergänzt?</h3>${labels?`<ul class="metadata-field-list">${labels}</ul>`:'<p class="hint">Keine fehlenden Angaben gefunden. Wähle oben ein anderes Cover, um es auszutauschen.</p>'}
-    <button class="primary-button metadata-submit" data-meta-action="apply" ${!labels?'disabled':''}>${labels?'Ausgewählte Buchdaten übernehmen':'Nichts zu ergänzen'}</button>`;
+    <h3 class="metadata-label">Was wird ergänzt?</h3>${labels?`<ul class="metadata-field-list">${labels}</ul>`:'<p class="hint">Keine fehlenden Angaben gefunden. Wähle oben ein anderes Cover oder optiere für Titel und Autoren.</p>'}
+    <button class="primary-button metadata-submit" data-meta-action="apply" ${!labels?'disabled':''}>${labels?'Ausgewählte Buchdaten übernehmen':'Nichts zu ergänzen'}</button></div>`;
+}
+async function runManualMetadataSearch(){
+  const query=String($('#metadataManualInput')?.value||'').trim();
+  if(query.length<2){toast('Bitte mindestens zwei Zeichen eingeben');return;}
+  const bookId=state.metadataBookId,seq=++state.metadataManualSeq;
+  state.metadataManualQuery=query;state.metadataManualResults=[];state.metadataManualBusy=true;state.metadataManualError='';state.metadataManualSearched=true;previewMetadata();
+  try{
+    const rows=await searchBookCatalog(query);
+    if(bookId!==state.metadataBookId||seq!==state.metadataManualSeq)return;
+    state.metadataManualResults=rows;
+  }catch(err){if(bookId===state.metadataBookId&&seq===state.metadataManualSeq){state.metadataManualError=err.message||'Suche derzeit nicht möglich';}}
+  finally{if(bookId===state.metadataBookId&&seq===state.metadataManualSeq){state.metadataManualBusy=false;previewMetadata();}}
+}
+async function selectManualMetadataResult(i){
+  const candidate=state.metadataManualResults[i],bookId=state.metadataBookId,seq=++state.metadataManualSeq;
+  if(!candidate)return;
+  state.metadataBusy=true;previewMetadata();
+  try{
+    const detail=await lookupSelectedCatalogBook(candidate);
+    if(bookId!==state.metadataBookId||seq!==state.metadataManualSeq)return;
+    state.metadataResult=detail;state.metadataSelectedManually=true;state.metadataReplaceIdentity=false;state.metadataCoverChoice=null;
+    state.metadataManualResults=[];state.metadataManualSearched=false;
+  }catch(err){console.warn(err);toast('Buchdaten konnten nicht geladen werden');}
+  finally{if(bookId===state.metadataBookId&&seq===state.metadataManualSeq){state.metadataBusy=false;previewMetadata();}}
 }
 async function openMetadataReview(id){
   const book=state.books.find(b=>b.id===id);if(!book)return;
-  state.metadataBookId=id;state.metadataResult=null;state.metadataCoverChoice=null;state.metadataBusy=true;
+  state.metadataBookId=id;state.metadataResult=null;state.metadataCoverChoice=null;state.metadataBusy=true;state.metadataManualResults=[];state.metadataManualQuery='';state.metadataManualBusy=false;state.metadataManualSearched=false;state.metadataManualError='';state.metadataSelectedManually=false;state.metadataReplaceIdentity=false;++state.metadataManualSeq;
   openSheet('#metadataSheet');previewMetadata();
   try{const result=await lookupBookMetadata(book,{withVariants:true});if(state.metadataBookId!==id)return;state.metadataResult=result;}
   catch(err){console.warn(err);toast('Suche fehlgeschlagen')}
@@ -198,7 +256,7 @@ async function applyMetadataReview(){
   const book=state.books.find(b=>b.id===state.metadataBookId),proposal=state.metadataResult;
   if(!book||!proposal||state.metadataBusy)return;
   const selected=state.metadataCoverChoice;
-  const patch=makeMetadataPatch(book,proposal,{selectedCover:selected,replaceCover:!!selected&&selected!==book.cover_url});
+  const patch=metadataPatchForCurrent(book,proposal);
   if(!Object.keys(patch).length){toast('Nichts zu ergänzen');return;}
   state.metadataBusy=true;
   try{await persistMetadataPatch(book,patch);state.metadataResult=null;state.metadataCoverChoice=null;closeOverlays();openBook(book.id);toast('Buchdaten ergänzt')}
@@ -229,6 +287,8 @@ async function bulkMetadata(){
   toast(`${updated} Bücher ergänzt`);
 }
 function bindMetadataEvents(){
+  document.addEventListener('submit',e=>{if(e.target.id==='metadataManualForm'){e.preventDefault();void runManualMetadataSearch()}},true);
+  document.addEventListener('change',e=>{if(e.target.id==='metadataReplaceIdentity'){state.metadataReplaceIdentity=e.target.checked;previewMetadata()}},true);
   document.addEventListener('click',async e=>{
     const btn=e.target.closest('[data-meta-action]');if(!btn)return;
     e.preventDefault();e.stopPropagation();
@@ -239,6 +299,7 @@ function bindMetadataEvents(){
     else if(action==='apply')await applyMetadataReview();
     else if(action==='bulk')await bulkMetadata();
     else if(action==='edit'){closeOverlays();openBook(state.metadataBookId);editBookInline()}
+    else if(action==='choose-candidate')await selectManualMetadataResult(Number(btn.dataset.candidateIndex))
   },true);
 }
 async function boot(){loadLocal();loadLocalQuotes();try{const email=localStorage.getItem('bookfolio-login-email');if(email&&$('#authEmail'))$('#authEmail').value=email;if(email&&$('#passwordLoginEmail'))$('#passwordLoginEmail').value=email}catch{}bindEvents();bindQuoteEvents();bindMetadataEvents();renderAll();await initSupabase();if(!CONFIG.previewMode&&'serviceWorker'in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('./sw.js').catch(()=>{})}
