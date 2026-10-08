@@ -22,6 +22,9 @@ create table if not exists public.books (
   language text,
   genres text[] not null default '{}',
   notes text not null default '',
+  description text not null default '',
+  description_source text not null default '',
+  description_source_url text not null default '',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint books_finished_after_started

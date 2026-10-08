@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#f5f0e8" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-  <meta name="apple-mobile-web-app-title" content="Bibliothek" />
-  <title>Meine Bibliothek</title>
+  <meta name="apple-mobile-web-app-title" content="Bookfolio" />
+  <title>Bookfolio – Meine Bibliothek</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="styles.css" />
@@ -133,6 +133,7 @@
     <div id="authorsContent"></div>
   </section>
 
+  <section id="metadataSheet" class="sheet metadata-sheet" aria-hidden="true"><div class="sheet-handle"></div><div id="metadataContent"></div></section>
   <section id="quotesSheet" class="sheet quotes-sheet" aria-hidden="true"><div class="sheet-handle"></div><div id="quotesContent"></div></section>
   <section id="quotesImportSheet" class="sheet quotes-sheet" aria-hidden="true"><div class="sheet-handle"></div><div id="quotesImportContent"></div></section>
   <input type="file" id="quotesFile" accept=".txt,.md,text/plain,text/markdown" hidden>
@@ -143,9 +144,10 @@
     <div id="syncStatusCard" class="settings-card"></div>
     <div class="settings-card"><h3>Supabase-Anmeldung</h3><p class="muted small">Die App ist mit deinem eigenen Supabase-Projekt verbunden. Für die geräteübergreifende Synchronisation meldest du dich per Magic Link an. Auf einer veröffentlichten HTTPS-Adresse funktioniert die Rückkehr aus der E-Mail direkt in die App.</p><form id="authForm" class="inline-auth"><input id="authEmail" type="email" placeholder="deine@email.de" /><button class="small-button" type="submit">Magic Link</button></form><button id="signOutButton" class="text-button hidden" data-action="sign-out">Abmelden</button></div>
     <div class="settings-card"><h3>Daten sichern & übernehmen</h3><p class="muted small">Der JSON-Import ergänzt deine Bibliothek, ohne vorhandene Bücher zu ersetzen. ISBN und Titel/Autor werden auf Dubletten geprüft. Bei bestehender Anmeldung werden neue Bücher zu Supabase übertragen.</p><div class="settings-actions"><button class="small-button" data-action="export-json">JSON exportieren</button><label class="small-button file-label">Bücher importieren<input id="importFile" type="file" accept=".json,application/json" hidden /></label></div></div>
+    <div class="settings-card"><h3>Buchdaten & Kurzinhalt</h3><p class="muted small">Fehlende Cover, Seitenzahlen, Erscheinungsjahr und Kurzinhalt bei Open Library und Google Books suchen. Bestehende persönliche Daten bleiben unverändert; pro Durchlauf werden höchstens 12 Bücher geprüft.</p><div class="settings-actions"><button class="small-button" data-meta-action="bulk">Fehlende Buchdaten ergänzen</button></div><p id="metadataBatchStatus" class="muted small metadata-progress" role="status" aria-live="polite"></p></div>
     <div class="settings-card"><h3>Markierungen & Zitate</h3><p class="muted small">Tolino-/Notulator-TXT oder Markdown aus Yomu importieren. Kapitel und Quellen bleiben erhalten. Wiederholte Importe legen keine doppelten Zitate an.</p><div class="settings-actions"><button class="small-button" data-quote-action="pick-file">Markierungen importieren</button></div></div>
     <div class="settings-card"><h3>Vollständiges Backup</h3><p class="muted small">Sichert Bücher <strong>und</strong> alle Zitate gemeinsam. Die bisherigen Bücher-JSON-Dateien funktionieren weiterhin.</p><div class="settings-actions"><button class="small-button" data-quote-action="export-full">Komplett sichern</button><label class="small-button file-label">Komplett-Backup einlesen<input type="file" accept=".json" id="backupProxyFile" hidden></label></div></div>
-    <div class="settings-card"><h3>Über diese Version</h3><p class="muted small">V0.6 · Tolino-/Yomu-Markierungen, Zitate pro Buch und privater Synchronisation.</p></div>
+    <div class="settings-card"><h3>Über diese Version</h3><p class="muted small">V0.7 · Kurzinhalt und ergänzende Buchdaten, Coverwahl, Autorenübersicht und Markierungen.</p></div>
   </section>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>

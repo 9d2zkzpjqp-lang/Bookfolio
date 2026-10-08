@@ -1,33 +1,40 @@
-# Meine Bibliothek · Version 0.6
+# Bookfolio · Version 0.7
 
-Einfaches, coverzentriertes digitales Bücherregal für iPhone, iPad und Mac. Mit persönlicher Statistik, Autorenübersicht und Markierungsimport aus Yomu (Markdown `.md`) oder aus Notulator für Tolino (TXT-Einzeldatei `.txt`).
+Persönliche, coverzentrierte Bücher- und Lesestatistik-App (HTML/PWA) für iPhone, iPad und Mac. Mit Supabase-Synchronisation, Autorenübersicht und privatem Zitatimport aus Tolino/Notulator und Yomu.
 
-## Neu: Zitate und Markierungen
+## Neu in V0.7
 
-- **Buch öffnen → Markierungen & Zitate → +** oder **Einstellungen → Markierungen importieren**.
-- TXT/MD auswählen. Der Import liest Buchname, Autor und Markierungen aus; vor dem Speichern zeigt er die Zuordnung zum vorhandenen Buch oder die Option **Neues Buch anlegen**. Die Daten werden **nicht automatisch einem anderen Buch zugeordnet**.
-- In der Buchdetailseite erscheint eine kurze Vorschau. Antippen öffnet Kapitelgruppen mit vollständigem Text, Quelldatum und – bei Yomu – dem internen Link zur Markierung (sofern Yomu auf dem Gerät diesen Link unterstützt).
-- Wiederholtes Einlesen derselben Markierungen erzeugt keine Duplikate. Einzelne Zitate lassen sich löschen, weitere manuell ergänzen oder pro Buch als Markdown exportieren.
-- **Komplettes Backup** unter Einstellungen sichert Bücher und Zitate zusammen; das alte „JSON exportieren“ sichert weiterhin **nur Bücher**. Backups sind private Dateien und gehören **nicht in ein öffentliches GitHub-Repository**.
+- Beim Hinzufügen über Titel-/Autorensuche oder manuelle Eingabe werden Kurzbeschreibung und fehlende Angaben **im Hintergrund** ergänzt, sofern ein plausibler Treffer bei Open Library bzw. Google Books gefunden wird.
+- In der **Buchdetailseite** erscheint der kurze **Kurzinhalt** (ausklappbar). Er ist getrennt von persönlichen Notizen und Zitaten. Wenn vorhanden, wird die Datenquelle angezeigt.
+- **Buch öffnen → `•••` → „Cover & Buchdaten ergänzen“** oder unten **„Buchdaten ergänzen“**: Vorschau prüfen, bei Bedarf ein anderes Cover auswählen, anschließend Änderungen ausdrücklich übernehmen. Vorhandene Angaben werden nicht überschrieben, außer wenn ein Cover aktiv ausgewählt wird.
+- Unter **Einstellungen → Buchdaten & Kurzinhalt → „Fehlende Buchdaten ergänzen“**: bis zu 12 Bücher pro Durchlauf auf fehlende Cover, Seiten, Erscheinungsjahr und Kurzbeschreibungen prüfen. Weitere Bücher folgen beim nächsten Durchlauf.
+- Kurzinhalt kann außerdem direkt über **Buch → Bearbeiten** verändert oder ergänzt werden.
 
-**Dateiformate:**
-- Tolino-`notes.txt` (Rohdatei mit mehreren Büchern) bitte zuerst über [Notulator](https://www.notulator.com/de/) nach **einer TXT-Datei pro Buch** konvertieren. Die Rohdatei wird von dieser Version noch nicht direkt gelesen.
-- Yomu: „Markierungen exportieren“ als Markdown (`.md`).
-- Bei nicht erkennbaren Formaten gibt die App eine Fehlermeldung aus, ohne Inhalte zu verändern.
+**Wichtig:** Die Suche kann fehlende Informationen nicht für jedes Buch finden. Beim automatischen Sammelimport wird eine fehlende ISBN nicht aufgrund irgendeiner Auflage geraten; du kannst die passende ISBN bei Einzelbearbeitung selbst prüfen. Bewertungen, Lesefortschritt/-status, Lesedaten, Genre/Tags, eigene Notizen und Zitate werden von der Metadaten-Suche **niemals überschrieben**.
 
-Die originale Exportdatei wird **im Browser gelesen, nicht hochgeladen**. Erst nach deiner Bestätigung werden einzelne Zitate in Supabase gespeichert. Ohne Anmeldung erfolgt die Speicherung nur lokal auf dem aktuellen Gerät. Details der Synchronisation und Magic-Link-Anmeldung bleiben wie in V0.5.
+## Supabase – erledigt
 
-## Supabase
+Das bestehende Projekt `qqovvzqfftxwjhybzbzg` wurde **bereits** um drei neue Textfelder in `public.books` erweitert: `description`, `description_source`, `description_source_url`. Die DDL steht zusätzlich zur Dokumentation in `metadata-migration.sql`. RLS und bisherige Policies bestehen unverändert weiter. Der Browser enthält ausschließlich den Supabase-Publishable-Key (keinen Secret-Key). Du musst im Supabase-Dashboard **kein SQL mehr ausführen**.
 
-Das bestehende Projekt **Meine Bibliothek** in `eu-central-1` wurde bereits um die Tabelle `public.book_quotes` erweitert. Die Migration liegt für Dokumentations-/Wiederherstellungszwecke unter `quotes-migration.sql`. Die Tabelle ist per RLS geschützt (eingeloggte Nutzer dürfen ausschließlich Zitate der eigenen Bücher lesen und bearbeiten). Die Browser-App nutzt nur den **Publishable Key**, keine Admin-Zugangsdaten.
+## Veröffentlichung auf GitHub Pages
 
-Die App braucht weiterhin ein HTTPS-Hosting (z. B. GitHub Pages) und die entsprechende Site URL/Redirect URL in Supabase Auth, um geräteübergreifend per Magic Link zu synchronisieren. Noch kein Nutzer angemeldet → noch keine Buch- oder Zitatdaten online.
+Die Dateien aus diesem Verzeichnis in dein bestehendes GitHub-Repository hochladen (bestehende Dateien gleichen Namens ersetzen, neue Datei `metadata.js` ergänzen). Nicht den ZIP-Ordner als Unterordner hochladen: `index.html` und `metadata.js` müssen im **Root** liegen.
 
-## Vorschau vs. Produktivversion
+Repository: https://github.com/9d2zkzpjqp-lang/Bookfolio
+App: https://9d2zkzpjqp-lang.github.io/Bookfolio/
 
-- `index.html` und andere Dateien aus **meine-bibliothek-v0.6-app.zip**: Produktiv-PWA, **keine privaten Beispielbücher/Zitate** enthalten.
-- **meine-bibliothek-v0.6-private-vorschau.html**: Eigenständige HTML-Datei mit deinen 5 übernommenen Book-Track-Büchern und zwei Zusatzbüchern mit insgesamt 35 Beispielmarkierungen aus den hier hochgeladenen Dateien. Nur zum lokalen Testen, ohne Supabase. Diese private Vorschau **nicht auf GitHub Pages hochladen**.
+Nach dem GitHub-Pages-Deploy die App neu laden. Bei alten PWA-Ansichten kann ein zweiter Reload bzw. Neustart der installierten App nötig sein, weil ein Service Worker noch die vorige Version im Cache hat. Die neue Cache-Version ist `bookfolio-v07`.
 
-## Übernahme deiner bisher hochgeladenen Dateien
+Die private Book-Tracker-/Zitate-Importdatei **nicht in das öffentliche Repository hochladen**. Die sieben bereits in Supabase gespeicherten Bücher bleiben unberührt; erst nach Betätigen des Ergänzen-Buttons werden die fehlenden Angaben gespeichert.
 
-Der **separat bereitgestellte** private Datenstamm `meine-bibliothek-v0.6-privater-datenstamm.json` enthält bereits alle fünf aus Book Track übernommenen Titel, zwei neue Bücher (*Bindung ohne Burnout*, *Anfänge*) und die **35** erkannten Markierungen. Unter **Einstellungen → Vollständiges Backup → Komplett-Backup einlesen** lässt sich alles in einem Schritt importieren. Bereits vorhandene Bücher und identische Zitate werden übersprungen; neue Zitate werden bestehenden Titeln zugeordnet. **Nicht** ins öffentliche GitHub-Repository legen.
+## Zitate (weiterhin wie in V0.6)
+
+- Buch öffnen → Markierungen & Zitate → `+` oder Einstellungen → Markierungen importieren.
+- Tolino: von Notulator je Buch ausgegebene TXT-Datei; Yomu: Markdown-Datei (`.md`).
+- Kapitel, Quelle und ggf. Yomu-Links werden erhalten; wiederholte Importe erzeugen keine Duplikate.
+- Unter **Einstellungen → Vollständiges Backup** Bücher **und** Zitate exportieren/importieren.
+- Das komplette Backup bleibt mit früheren V0.6-Sicherungen kompatibel; es enthält nun zusätzlich die Kurzinhalt-Felder pro Buch.
+
+## Installation der PWA
+
+GitHub-Pages-Adresse in Safari öffnen → Teilen → „Zum Home-Bildschirm“. Für die Synchronisation mit Supabase mit derselben E-Mail-Adresse auf jedem Gerät anmelden.
