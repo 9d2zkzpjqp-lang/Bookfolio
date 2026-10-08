@@ -130,9 +130,8 @@
 .book-menu{position:absolute;z-index:12;right:0;top:45px;width:220px;padding:6px;background:#fffdf9;border:1px solid var(--line);border-radius:14px;box-shadow:0 12px 28px rgba(42,30,17,.12)}
 .book-menu button{display:block;width:100%;text-align:left;border:0;background:transparent;padding:12px 10px;border-radius:9px;color:var(--ink);font-size:.89rem;cursor:pointer}
 .book-menu button:hover{background:#f3ece4}
-.summary-header{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
-.summary-source{font-size:.74rem;color:var(--muted)}
-.summary-source a{color:var(--accent);text-decoration:none}
+.summary-source{font-size:.75rem;line-height:1.5;color:var(--muted);margin:8px 0 10px}
+.summary-source a{color:var(--muted);text-decoration:underline;text-decoration-color:rgba(116,109,102,.45);text-underline-offset:3px}
 .summary-text{font-size:.98rem;line-height:1.6;color:var(--ink);white-space:pre-line;margin:10px 0}
 .summary-text.is-collapsed{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;overflow:hidden}
 .summary-more{padding:5px 0;margin-bottom:9px}
