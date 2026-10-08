@@ -142,12 +142,38 @@
     <div class="sheet-handle"></div>
     <div class="sheet-header"><div><p class="eyebrow">Synchronisation & Daten</p><h2>Einstellungen</h2></div><button class="icon-button" data-action="close-overlays" aria-label="Schließen">×</button></div>
     <div id="syncStatusCard" class="settings-card"></div>
-    <div class="settings-card"><h3>Supabase-Anmeldung</h3><p class="muted small">Die App ist mit deinem eigenen Supabase-Projekt verbunden. Für die geräteübergreifende Synchronisation meldest du dich per Magic Link an. Auf einer veröffentlichten HTTPS-Adresse funktioniert die Rückkehr aus der E-Mail direkt in die App.</p><form id="authForm" class="inline-auth"><input id="authEmail" type="email" placeholder="deine@email.de" /><button class="small-button" type="submit">Magic Link</button></form><button id="signOutButton" class="text-button hidden" data-action="sign-out">Abmelden</button></div>
+    <div class="settings-card" id="authSettingsCard">
+      <h3>Anmeldung</h3>
+      <p class="muted small">Auf iPhone und iPad bitte <strong>direkt in der Home-Bildschirm-App</strong> anmelden. Ein Magic Link aus Mail öffnet sich meist in Safari statt in der installierten App.</p>
+      <div id="authControls">
+        <form id="authForm" class="auth-email-form">
+          <label class="auth-field-label" for="authEmail">E-Mail-Adresse</label>
+          <div class="inline-auth"><input id="authEmail" type="email" placeholder="deine@email.de" autocomplete="email" required /><button class="small-button" type="submit">E-Mail senden</button></div>
+        </form>
+        <div id="authVerifySection" class="auth-verify-section">
+          <form id="authOtpForm" class="auth-code-form">
+            <label class="auth-field-label" for="authOtpCode">Anmeldecode aus der E-Mail</label>
+            <div class="inline-auth"><input id="authOtpCode" type="text" inputmode="numeric" pattern="[0-9]{6,8}" minlength="6" maxlength="8" autocomplete="one-time-code" placeholder="6-stelliger Code" required /><button class="small-button" type="submit">Anmelden</button></div>
+          </form>
+          <p class="muted small auth-hint">Enthält deine E-Mail bisher <strong>nur einen Link</strong>? Du kannst ihn unten direkt in Bookfolio einlösen. Für einen Zahlencode wird einmalig die Supabase-Mailvorlage angepasst.</p>
+          <details class="auth-link-details" id="authLinkDetails">
+            <summary>Stattdessen Magic Link einfügen</summary>
+            <p class="muted small">In Mail den Anmeldelink <strong>lange gedrückt halten → Link kopieren</strong> (nicht öffnen). Hier in Bookfolio einfügen:</p>
+            <form id="authLinkForm" class="auth-link-form">
+              <textarea id="authLinkInput" rows="2" placeholder="https://…supabase.co/auth/v1/verify?…" spellcheck="false" autocapitalize="off" autocomplete="off" required></textarea>
+              <button class="small-button" type="submit">Kopierten Link einlösen</button>
+            </form>
+          </details>
+          <p id="authFeedback" class="muted small auth-feedback" role="status" aria-live="polite"></p>
+        </div>
+      </div>
+      <button id="signOutButton" class="text-button hidden" data-action="sign-out">Abmelden</button>
+    </div>
     <div class="settings-card"><h3>Daten sichern & übernehmen</h3><p class="muted small">Der JSON-Import ergänzt deine Bibliothek, ohne vorhandene Bücher zu ersetzen. ISBN und Titel/Autor werden auf Dubletten geprüft. Bei bestehender Anmeldung werden neue Bücher zu Supabase übertragen.</p><div class="settings-actions"><button class="small-button" data-action="export-json">JSON exportieren</button><label class="small-button file-label">Bücher importieren<input id="importFile" type="file" accept=".json,application/json" hidden /></label></div></div>
     <div class="settings-card"><h3>Buchdaten & Kurzinhalt</h3><p class="muted small">Fehlende Cover, Seitenzahlen, Erscheinungsjahr und Kurzinhalt bei Open Library und Google Books suchen. Bestehende persönliche Daten bleiben unverändert; pro Durchlauf werden höchstens 12 Bücher geprüft.</p><div class="settings-actions"><button class="small-button" data-meta-action="bulk">Fehlende Buchdaten ergänzen</button></div><p id="metadataBatchStatus" class="muted small metadata-progress" role="status" aria-live="polite"></p></div>
     <div class="settings-card"><h3>Markierungen & Zitate</h3><p class="muted small">Tolino-/Notulator-TXT oder Markdown aus Yomu importieren. Kapitel und Quellen bleiben erhalten. Wiederholte Importe legen keine doppelten Zitate an.</p><div class="settings-actions"><button class="small-button" data-quote-action="pick-file">Markierungen importieren</button></div></div>
     <div class="settings-card"><h3>Vollständiges Backup</h3><p class="muted small">Sichert Bücher <strong>und</strong> alle Zitate gemeinsam. Die bisherigen Bücher-JSON-Dateien funktionieren weiterhin.</p><div class="settings-actions"><button class="small-button" data-quote-action="export-full">Komplett sichern</button><label class="small-button file-label">Komplett-Backup einlesen<input type="file" accept=".json" id="backupProxyFile" hidden></label></div></div>
-    <div class="settings-card"><h3>Über diese Version</h3><p class="muted small">V0.7 · Kurzinhalt und ergänzende Buchdaten, Coverwahl, Autorenübersicht und Markierungen.</p></div>
+    <div class="settings-card"><h3>Über diese Version</h3><p class="muted small">V0.7.2 · PWA-Anmeldung mit E-Mail-Code und kopiertem Link · Kurzinhalt und ergänzende Buchdaten, Coverwahl, Autorenübersicht und Markierungen.</p></div>
   </section>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>

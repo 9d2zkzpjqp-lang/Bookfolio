@@ -152,3 +152,21 @@
 .metadata-submit{width:100%;margin:6px 0 16px}
 .metadata-progress{padding-top:9px;line-height:1.5}
 @media(max-width:480px){.metadata-cover-choice img,.metadata-cover-old{height:115px}.summary-text{font-size:.98rem}.metadata-description{font-size:.94rem}}
+
+/* PWA-auth: code and copied-link login */
+.auth-email-form,.auth-code-form{display:grid;gap:8px}
+.auth-field-label{font-size:.93rem;color:var(--ink);font-weight:600}
+.auth-verify-section{margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
+.auth-verify-section .inline-auth,.auth-email-form .inline-auth{display:flex;align-items:stretch;gap:9px;flex-wrap:wrap}
+.auth-verify-section input,.auth-email-form input{min-width:0;flex:1 1 165px;font-size:1rem}
+#authOtpCode{font-size:1.12rem;letter-spacing:.13em;font-variant-numeric:tabular-nums}
+.auth-hint{margin:11px 0 15px;line-height:1.5}
+.auth-link-details{border:1px solid var(--line);background:rgba(255,255,255,.48);border-radius:14px;padding:13px 14px}
+.auth-link-details summary{font-size:.92rem;font-weight:600;cursor:pointer;color:var(--accent-dark)}
+.auth-link-details p{margin:12px 0 10px}
+.auth-link-form{display:grid;gap:10px}
+.auth-link-form textarea{width:100%;resize:vertical;min-height:72px;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--surface-solid);font-size:.92rem;overflow-wrap:anywhere}
+.auth-link-form button{justify-self:start}
+.auth-feedback{margin:10px 0 0;min-height:1.2em}
+.auth-feedback.auth-error{color:#ab3e32}
+@media(max-width:460px){.auth-email-form .inline-auth button,.auth-verify-section .inline-auth button{flex:0 0 auto}}
