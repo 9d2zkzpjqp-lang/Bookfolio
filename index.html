@@ -144,28 +144,52 @@
     <div id="syncStatusCard" class="settings-card"></div>
     <div class="settings-card" id="authSettingsCard">
       <h3>Anmeldung</h3>
-      <p class="muted small">Auf iPhone und iPad bitte <strong>direkt in der Home-Bildschirm-App</strong> anmelden. Ein Magic Link aus Mail öffnet sich meist in Safari statt in der installierten App.</p>
       <div id="authControls">
-        <form id="authForm" class="auth-email-form">
-          <label class="auth-field-label" for="authEmail">E-Mail-Adresse</label>
-          <div class="inline-auth"><input id="authEmail" type="email" placeholder="deine@email.de" autocomplete="email" required /><button class="small-button" type="submit">E-Mail senden</button></div>
+        <p class="muted small">Melde dich auf iPhone, iPad und Mac direkt mit deinem bestehenden Bookfolio-Konto an – ohne E-Mail-Link.</p>
+        <form id="passwordLoginForm" class="auth-password-form">
+          <label class="auth-field-label" for="passwordLoginEmail">E-Mail-Adresse</label>
+          <input id="passwordLoginEmail" type="email" name="username" autocomplete="username" placeholder="deine@email.de" required />
+          <label class="auth-field-label" for="passwordLoginPassword">Passwort</label>
+          <input id="passwordLoginPassword" type="password" name="password" autocomplete="current-password" placeholder="Dein Bookfolio-Passwort" required />
+          <button type="submit" class="primary-button auth-password-submit">Mit Passwort anmelden</button>
         </form>
-        <div id="authVerifySection" class="auth-verify-section">
-          <form id="authOtpForm" class="auth-code-form">
-            <label class="auth-field-label" for="authOtpCode">Anmeldecode aus der E-Mail</label>
-            <div class="inline-auth"><input id="authOtpCode" type="text" inputmode="numeric" pattern="[0-9]{6,8}" minlength="6" maxlength="8" autocomplete="one-time-code" placeholder="6-stelliger Code" required /><button class="small-button" type="submit">Anmelden</button></div>
+        <p id="passwordLoginFeedback" class="muted small auth-feedback" role="status" aria-live="polite"></p>
+        <p class="muted small auth-first-time-hint">Noch kein Passwort festgelegt? Öffne Bookfolio in dem Browser, in dem du bereits angemeldet bist, und lege es dort unter Einstellungen fest. <strong>Kein neues Konto erstellen.</strong></p>
+        <details class="auth-link-details auth-alternatives" id="authAlternativeDetails">
+          <summary>Andere Anmeldewege (E-Mail-Link oder Code)</summary>
+          <p class="muted small">Nur erforderlich, wenn du dein Passwort noch nicht einrichten konntest. Magic Links werden aus Mail meist in Safari statt in der Home-Bildschirm-App geöffnet.</p>
+          <form id="authForm" class="auth-email-form">
+            <label class="auth-field-label" for="authEmail">E-Mail-Adresse</label>
+            <div class="inline-auth"><input id="authEmail" type="email" placeholder="deine@email.de" autocomplete="email" required /><button class="small-button" type="submit">E-Mail senden</button></div>
           </form>
-          <p class="muted small auth-hint">Enthält deine E-Mail bisher <strong>nur einen Link</strong>? Du kannst ihn unten direkt in Bookfolio einlösen. Für einen Zahlencode wird einmalig die Supabase-Mailvorlage angepasst.</p>
-          <details class="auth-link-details" id="authLinkDetails">
-            <summary>Stattdessen Magic Link einfügen</summary>
-            <p class="muted small">In Mail den Anmeldelink <strong>lange gedrückt halten → Link kopieren</strong> (nicht öffnen). Hier in Bookfolio einfügen:</p>
-            <form id="authLinkForm" class="auth-link-form">
-              <textarea id="authLinkInput" rows="2" placeholder="https://…supabase.co/auth/v1/verify?…" spellcheck="false" autocapitalize="off" autocomplete="off" required></textarea>
-              <button class="small-button" type="submit">Kopierten Link einlösen</button>
+          <div id="authVerifySection" class="auth-verify-section">
+            <form id="authOtpForm" class="auth-code-form">
+              <label class="auth-field-label" for="authOtpCode">Anmeldecode aus der E-Mail</label>
+              <div class="inline-auth"><input id="authOtpCode" type="text" inputmode="numeric" pattern="[0-9]{6,8}" minlength="6" maxlength="8" autocomplete="one-time-code" placeholder="6-stelliger Code" required /><button class="small-button" type="submit">Anmelden</button></div>
             </form>
-          </details>
-          <p id="authFeedback" class="muted small auth-feedback" role="status" aria-live="polite"></p>
-        </div>
+            <p class="muted small auth-hint">Bei der Supabase-Standard-E-Mail wird ein Link statt eines Zahlencodes versendet.</p>
+            <details class="auth-link-details" id="authLinkDetails">
+              <summary>Stattdessen Magic Link einfügen</summary>
+              <p class="muted small">Den Link aus Mail lange gedrückt halten und kopieren, ohne ihn zu öffnen.</p>
+              <form id="authLinkForm" class="auth-link-form">
+                <textarea id="authLinkInput" rows="2" placeholder="https://…supabase.co/auth/v1/verify?…" spellcheck="false" autocapitalize="off" autocomplete="off" required></textarea>
+                <button class="small-button" type="submit">Kopierten Link einlösen</button>
+              </form>
+            </details>
+            <p id="authFeedback" class="muted small auth-feedback" role="status" aria-live="polite"></p>
+          </div>
+        </details>
+      </div>
+      <div id="passwordChangeSection" class="hidden">
+        <p class="muted small">Du bist angemeldet. Lege hier ein Passwort für <strong>dieses bestehende Konto</strong> fest. Danach funktioniert die Anmeldung auf dem Home-Bildschirm ganz ohne E-Mail.</p>
+        <form id="passwordChangeForm" class="auth-password-form">
+          <label class="auth-field-label" for="passwordNew">Neues Passwort</label>
+          <input id="passwordNew" type="password" name="new-password" autocomplete="new-password" minlength="12" placeholder="Mindestens 12 Zeichen" required />
+          <label class="auth-field-label" for="passwordConfirm">Passwort bestätigen</label>
+          <input id="passwordConfirm" type="password" name="confirm-password" autocomplete="new-password" minlength="12" placeholder="Passwort wiederholen" required />
+          <button class="small-button" type="submit">Passwort festlegen / ändern</button>
+        </form>
+        <p id="passwordChangeFeedback" class="muted small auth-feedback" role="status" aria-live="polite"></p>
       </div>
       <button id="signOutButton" class="text-button hidden" data-action="sign-out">Abmelden</button>
     </div>
@@ -173,7 +197,7 @@
     <div class="settings-card"><h3>Buchdaten & Kurzinhalt</h3><p class="muted small">Fehlende Cover, Seitenzahlen, Erscheinungsjahr und Kurzinhalt bei Open Library und Google Books suchen. Bestehende persönliche Daten bleiben unverändert; pro Durchlauf werden höchstens 12 Bücher geprüft.</p><div class="settings-actions"><button class="small-button" data-meta-action="bulk">Fehlende Buchdaten ergänzen</button></div><p id="metadataBatchStatus" class="muted small metadata-progress" role="status" aria-live="polite"></p></div>
     <div class="settings-card"><h3>Markierungen & Zitate</h3><p class="muted small">Tolino-/Notulator-TXT oder Markdown aus Yomu importieren. Kapitel und Quellen bleiben erhalten. Wiederholte Importe legen keine doppelten Zitate an.</p><div class="settings-actions"><button class="small-button" data-quote-action="pick-file">Markierungen importieren</button></div></div>
     <div class="settings-card"><h3>Vollständiges Backup</h3><p class="muted small">Sichert Bücher <strong>und</strong> alle Zitate gemeinsam. Die bisherigen Bücher-JSON-Dateien funktionieren weiterhin.</p><div class="settings-actions"><button class="small-button" data-quote-action="export-full">Komplett sichern</button><label class="small-button file-label">Komplett-Backup einlesen<input type="file" accept=".json" id="backupProxyFile" hidden></label></div></div>
-    <div class="settings-card"><h3>Über diese Version</h3><p class="muted small">V0.7.2 · PWA-Anmeldung mit E-Mail-Code und kopiertem Link · Kurzinhalt und ergänzende Buchdaten, Coverwahl, Autorenübersicht und Markierungen.</p></div>
+    <div class="settings-card"><h3>Über diese Version</h3><p class="muted small">V0.7.3 · E-Mail/Passwort, Einrichten im bestehenden Konto und alternative Link-Anmeldung · Kurzinhalt und ergänzende Buchdaten, Coverwahl, Autorenübersicht und Markierungen.</p></div>
   </section>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
