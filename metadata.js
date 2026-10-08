@@ -1,4 +1,5 @@
-// Bookfolio V0.7: metadata lookup. No account keys or personal data leave the app.
+// Bookfolio V0.7.8: German-first catalogue lookup with full volume-detail fallback.
+// Requests contain bibliographic information only; no account keys or reading notes.
 const FIELDS = ['cover_url', 'isbn', 'pages', 'published_year', 'language', 'description'];
 export const META_FIELDS = FIELDS;
 
@@ -28,10 +29,11 @@ export function matchScore(book, candidate) {
   const candidateAuthors=(candidate.authors || [candidate.author]).map(norm);
   // Compare complete author names or their last name, not first names: "David"
   // alone must not identify a book as written by David Wengrow.
-  const lastName=author.split(' ').filter(Boolean).at(-1)||'';
+  const lastNames = String(book.author || '').split(/[,;]|\s+und\s+|\s+and\s+|\s+&\s+/i)
+    .map(name=>norm(name).split(' ').at(-1)).filter(name=>name?.length>=3);
   const authorFit = !author ? .5 :
     (ca===author || ca.includes(author) || candidateAuthors.some(name=>name===author)) ? 1 :
-    (lastName.length>=3 && candidateAuthors.some(name=>name.split(' ').at(-1)===lastName)) ? .9 : 0;
+    (lastNames.some(last=>candidateAuthors.some(name=>name.split(' ').at(-1)===last))) ? .9 : 0;
   const sameIsbn = book.isbn && (candidate.isbns || []).some(v => v.replace(/[^0-9X]/gi,'') === String(book.isbn).replace(/[^0-9X]/gi,''));
   if (sameIsbn) return 1;
   if (titleFit < .75 || (author && authorFit < .6)) return 0;
@@ -54,16 +56,74 @@ export function makeMetadataPatch(book, candidate, { selectedCover = null, repla
   }
   return out;
 }
-async function getJSON(url, signal) {
-  const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 7000);
-  const abort = () => controller.abort();
-  signal?.addEventListener('abort', abort, { once:true });
-  try {
-    if (signal?.aborted) return null;
-    const res = await fetch(url, { signal:controller.signal, headers:{ Accept:'application/json' } });
-    return res.ok ? await res.json() : null;
-  } catch { return null; }
-  finally { clearTimeout(timeout); signal?.removeEventListener('abort', abort); }
+// Browsers cannot reliably set a User-Agent header. Respect the conservative
+// anonymous Open Library limit instead, even for overlapping book lookups.
+const queued = { openLibrary:Promise.resolve(), google:Promise.resolve() };
+const nextRequest = { openLibrary:0, google:0 };
+const responseCache=new Map();
+const wait = ms=>new Promise(resolve=>setTimeout(resolve,ms));
+const originName = url=>new URL(url).hostname.includes('openlibrary.org')?'openLibrary':'google';
+const providerName = name=>name==='openLibrary'?'Open Library':'Google Books';
+function throttle(provider, signal) {
+  const delay = provider==='openLibrary' ? 1200 : 300;
+  const turn = queued[provider].catch(()=>{}).then(async()=>{
+    if(signal?.aborted)throw new DOMException('Abgebrochen','AbortError');
+    const remaining=Math.max(0,nextRequest[provider]-Date.now());
+    if(remaining)await wait(remaining);
+    if(signal?.aborted)throw new DOMException('Abgebrochen','AbortError');
+    nextRequest[provider]=Date.now()+delay;
+  });
+  queued[provider]=turn.catch(()=>{});
+  return turn;
+}
+function recordIssue(diagnostics, provider, reason, retryable=false) {
+  if(!diagnostics)return;
+  const message=`${providerName(provider)}: ${reason}`;
+  if(!diagnostics.errors.includes(message))diagnostics.errors.push(message);
+  if(retryable)diagnostics.retryable=true;
+}
+const newDiagnostics=()=>({errors:[],retryable:false,successful:0});
+const isGerman = book=>/^(de|ger|deutsch)/i.test(String(book?.language||''));
+
+async function getJSON(url, signal, diagnostics=null) {
+  const cached=responseCache.get(url);
+  if(cached && Date.now()-cached.at<10*60*1000){if(diagnostics)diagnostics.successful++;return cached.data;}
+  const provider=originName(url);
+  for(let attempt=0;attempt<3;attempt++){
+    if(signal?.aborted)throw new DOMException('Abgebrochen','AbortError');
+    await throttle(provider,signal);
+    const controller=new AbortController();
+    const timeout=setTimeout(()=>controller.abort(),8500);
+    const abort=()=>controller.abort();
+    signal?.addEventListener('abort',abort,{once:true});
+    try{
+      const response=await fetch(url,{signal:controller.signal,headers:{Accept:'application/json'}});
+      if(response.status===404)return null;
+      if(response.ok){
+        const data=await response.json();
+        if(responseCache.size>120)responseCache.delete(responseCache.keys().next().value);
+        responseCache.set(url,{at:Date.now(),data});
+        if(diagnostics)diagnostics.successful++;
+        return data;
+      }
+      if([429,502,503,504].includes(response.status) && attempt<2){
+        const retryHeader=Number(response.headers?.get?.('Retry-After'));
+        const retryDelay=Number.isFinite(retryHeader)&&retryHeader>0 ? Math.min(retryHeader*1000,6000) : 900*(attempt+1);
+        await wait(retryDelay);continue;
+      }
+      recordIssue(diagnostics,provider,response.status===429?'Zugriffslimit erreicht':`HTTP ${response.status}`,[429,502,503,504].includes(response.status));
+      return null;
+    }catch(err){
+      if(signal?.aborted)throw err;
+      const timeoutHit=controller.signal.aborted;
+      if(attempt<2){await wait(800*(attempt+1));continue;}
+      recordIssue(diagnostics,provider,timeoutHit?'Zeitüberschreitung':'Netzwerkfehler',true);
+      return null;
+    }finally{
+      clearTimeout(timeout);signal?.removeEventListener('abort',abort);
+    }
+  }
+  return null;
 }
 const year = v => Number(String(v || '').match(/\b(1[5-9]\d{2}|20\d{2}|21\d{2})\b/)?.[1]) || null;
 const olCover = id => id ? `https://covers.openlibrary.org/b/id/${Number(id)}-L.jpg` : '';
@@ -73,35 +133,118 @@ const safeImage = url => {
 };
 const olDesc = value => typeof value === 'string' ? value : (value?.value || '');
 
+const bareTitle = title=>String(title||'').replace(/\s+(?:a novel|a thriller|ein roman|roman)$/i,'')
+  .split(/\s+[:–—]\s+/)[0].trim();
+const leadAuthor = author=>String(author||'').split(/[,;]|\s+und\s+|\s+and\s+|\s+&\s+/i)[0].trim();
+const volumeCandidate = item=>{
+  const v=item.volumeInfo||{};
+  return {
+    title:v.title||'', author:(v.authors||[]).join(', '), authors:v.authors||[],
+    isbns:(v.industryIdentifiers||[]).map(x=>x.identifier),
+    cover_url:safeImage(v.imageLinks?.thumbnail||v.imageLinks?.smallThumbnail),
+    isbn:(v.industryIdentifiers||[]).find(x=>x.type==='ISBN_13')?.identifier||'',
+    pages:v.pageCount||null, published_year:year(v.publishedDate),
+    language:v.language==='de'?'Deutsch':v.language==='en'?'Englisch':'',
+    description:shortDescription(v.description||''),description_source:'Google Books',
+    description_source_url:safeImage(v.infoLink||''), source:'Google Books', volume_id:item.id||''
+  };
+};
+const workCandidate = d=>({
+  title:d.title,authors:d.author_name||[],author:(d.author_name||[]).join(', '),isbns:d.isbn||[],
+  cover_url:olCover(d.cover_i),isbn:d.isbn?.[0]||'',pages:d.number_of_pages_median||null,
+  published_year:d.first_publish_year||null,
+  language:(d.language||[]).includes('ger')?'Deutsch':(d.language||[]).includes('eng')?'Englisch':'',
+  work_key:/^(?:\/works\/)?OL\d+W$/.test(d.key||'') ? (d.key.startsWith('/')?d.key:`/works/${d.key}`) : '',source:'Open Library'
+});
+function classifyDescription(book, candidate) {
+  return candidate.description ? (candidate.language==='Deutsch'?3 : candidate.language==='Englisch'?1:2) : 0;
+}
+function bestDescription(book, candidates, germanOnly=false) {
+  return candidates.filter(c=>c.description&&matchScore(book,c)>=.75)
+    .filter(c=>!germanOnly||c.language==='Deutsch')
+    .sort((a,b)=>classifyDescription(book,b)-classifyDescription(book,a)||matchScore(book,b)-matchScore(book,a))[0]||null;
+}
+function catalogUnavailable(diagnostics){
+  return diagnostics.successful===0 && diagnostics.errors.length>0;
+}
+function unavailableError(diagnostics){
+  return new Error(`Buchkataloge nicht erreichbar (${diagnostics.errors.join('; ')}). Bitte später erneut versuchen.`);
+}
+
+// The ISBN often identifies an edition whose catalogue record has no blurb.
+// Retry by work/title and author, and take the synopsis from a *different*
+// edition only after validating that it is the same title and author.
+// The Google Books search endpoint can omit a synopsis even if the book's
+// individual volume record has one. Ask for full details of a few strictly
+// title/author-matched volumes before concluding that no synopsis exists.
+async function getFullGoogleDescription(book, candidates, signal, diagnostics) {
+  const seen = new Set();
+  const matches = candidates.filter(c => c.volume_id && matchScore(book,c) >= .75 && !c.description)
+    .sort((a,b) => Number(b.language==='Deutsch')-Number(a.language==='Deutsch') || matchScore(book,b)-matchScore(book,a));
+  let best = null;
+  for (const candidate of matches) {
+    if (seen.size >= 8 || signal?.aborted) break;
+    if (seen.has(candidate.volume_id)) continue;
+    seen.add(candidate.volume_id);
+    if (!/^[\w-]+$/.test(candidate.volume_id)) continue;
+    const full = await getJSON(`https://www.googleapis.com/books/v1/volumes/${encodeURIComponent(candidate.volume_id)}`,signal,diagnostics);
+    if (!full) continue;
+    const enriched = volumeCandidate(full);
+    if (!enriched.description || matchScore(book,enriched)<.75)continue;
+    if (!best || classifyDescription(book,enriched)>classifyDescription(book,best))best=enriched;
+    if (enriched.language==='Deutsch' || !isGerman(book))break;
+  }
+  return best;
+}
+
+async function findAlternateGoogleDescription(book,signal,diagnostics=newDiagnostics(),startingCandidates=[]){
+  let best=bestDescription(book,startingCandidates);
+  if(best?.language==='Deutsch')return best;
+  const title=bareTitle(book.title), author=leadAuthor(book.author);
+  const queries=[
+    {q:`intitle:${title}${author?` inauthor:${author}`:''}`,langRestrict:'de'},
+    {q:[title,author].filter(Boolean).join(' '),langRestrict:'de'},
+    {q:`intitle:${title}`,langRestrict:'de'},
+    {q:`intitle:${title}${author?` inauthor:${author}`:''}`},
+    {q:[title,author].filter(Boolean).join(' ')}
+  ];
+  const candidates=[...startingCandidates];
+  for(const params of queries){
+    if(signal?.aborted)break;
+    if(!params.q.trim())continue;
+    const search=await getJSON(`https://www.googleapis.com/books/v1/volumes?${new URLSearchParams({...params,maxResults:'30',printType:'books'})}`,signal,diagnostics);
+    const editions=(search?.items||[]).map(volumeCandidate);
+    candidates.push(...editions);
+    const found=bestDescription(book,editions);
+    if(found?.language==='Deutsch')return found;
+    if(found&&(!best||classifyDescription(book,found)>classifyDescription(book,best)))best=found;
+    if(best && !params.langRestrict && !isGerman(book))break;
+  }
+  // A full-volume response may contain a description omitted in search results.
+  // Keep this bounded (max. eight detail requests) to avoid unnecessary traffic.
+  if (!best || (isGerman(book) && best.language!=='Deutsch')){
+    const fromDetails=await getFullGoogleDescription(book,candidates,signal,diagnostics);
+    if(fromDetails&&(!best||classifyDescription(book,fromDetails)>classifyDescription(book,best)))best=fromDetails;
+  }
+  return best;
+}
+
 export async function lookupBookMetadata(book, {signal, withVariants = false} = {}) {
   if (!book?.title) return null;
+  const diagnostics=newDiagnostics();
   const isbn = String(book.isbn || '').replace(/[^0-9X]/gi,'');
   const fields = 'key,title,author_name,cover_i,isbn,number_of_pages_median,first_publish_year,language';
   const params = new URLSearchParams({title:book.title, limit:'12', fields});
-  if (book.author) params.set('author',book.author);
+  if (book.author) params.set('author',leadAuthor(book.author));
   let [olSearch, googleSearch] = await Promise.all([
-    getJSON(`https://openlibrary.org/search.json?${params}`, signal),
-    getJSON(`https://www.googleapis.com/books/v1/volumes?${new URLSearchParams({q: isbn ? `isbn:${isbn}` : `intitle:${book.title} ${book.author ? `inauthor:${book.author}` : ''}`,maxResults:'12',printType:'books'})}`,signal)
+    getJSON(`https://openlibrary.org/search.json?${params}`, signal, diagnostics),
+    getJSON(`https://www.googleapis.com/books/v1/volumes?${new URLSearchParams({q: isbn ? `isbn:${isbn}` : `intitle:${bareTitle(book.title)} ${book.author ? `inauthor:${leadAuthor(book.author)}` : ''}`,maxResults:'20',printType:'books'})}`,signal,diagnostics)
   ]);
   // A catalog may only index the FIRST of several authors. Example: a book
   // stored as "Anfänge — David Wengrow" is cataloged under Graeber & Wengrow.
   // Validate candidates LOCALLY after querying title-only to avoid false matches.
-  const parseOL = search => (search?.docs||[]).map(d=>({
-    title:d.title, authors:d.author_name||[], author:(d.author_name||[]).join(' '), isbns:d.isbn||[],
-    cover_url:olCover(d.cover_i), isbn:d.isbn?.[0]||'', pages:d.number_of_pages_median||null,
-    published_year:d.first_publish_year||null,
-    language:(d.language||[]).includes('ger')?'Deutsch':(d.language||[]).includes('eng')?'Englisch':'',
-    work_key:/^\/works\/OL\d+W$/.test(d.key||'')?d.key:'', source:'Open Library'
-  })).map(x=>({...x,score:matchScore(book,x)})).filter(x=>x.score>=.75).sort((a,b)=>b.score-a.score);
-  const parseGB = search => (search?.items||[]).map(item=>{
-    const v=item.volumeInfo||{};
-    return {title:v.title||'',author:(v.authors||[]).join(' '),authors:v.authors||[],
-      isbns:(v.industryIdentifiers||[]).map(x=>x.identifier),cover_url:safeImage(v.imageLinks?.thumbnail || v.imageLinks?.smallThumbnail),
-      isbn:(v.industryIdentifiers||[]).find(x=>x.type==='ISBN_13')?.identifier||'',pages:v.pageCount||null,
-      published_year:year(v.publishedDate), language:v.language==='de'?'Deutsch':v.language==='en'?'Englisch':'',
-      description:shortDescription(v.description||''), description_source:'Google Books',
-      description_source_url:safeImage(v.infoLink||''),source:'Google Books'};
-  }).map(x=>({...x,score:matchScore(book,x)})).filter(x=>x.score>=.75).sort((a,b)=>b.score-a.score);
+  const parseOL = search => (search?.docs||[]).map(workCandidate).map(x=>({...x,score:matchScore(book,x)})).filter(x=>x.score>=.75).sort((a,b)=>b.score-a.score);
+  const parseGB = search => (search?.items||[]).map(volumeCandidate).map(x=>({...x,score:matchScore(book,x)})).filter(x=>x.score>=.75).sort((a,b)=>b.score-a.score);
 
   let olMatches = parseOL(olSearch), gbMatches = parseGB(googleSearch);
   // Retry a broader title-only query independently for each catalog that did
@@ -110,8 +253,8 @@ export async function lookupBookMetadata(book, {signal, withVariants = false} = 
     const titleOnly = new URLSearchParams({title:book.title,limit:'30',fields});
     const googleTitle = new URLSearchParams({q:`intitle:${book.title}`,maxResults:'30',printType:'books'});
     const [olWide,gbWide] = await Promise.all([
-      olMatches.length ? Promise.resolve(null) : getJSON(`https://openlibrary.org/search.json?${titleOnly}`, signal),
-      gbMatches.length ? Promise.resolve(null) : getJSON(`https://www.googleapis.com/books/v1/volumes?${googleTitle}`,signal)
+      olMatches.length ? Promise.resolve(null) : getJSON(`https://openlibrary.org/search.json?${titleOnly}`, signal,diagnostics),
+      gbMatches.length ? Promise.resolve(null) : getJSON(`https://www.googleapis.com/books/v1/volumes?${googleTitle}`,signal,diagnostics)
     ]);
     olSearch ||= olWide; googleSearch ||= gbWide;
     if (!olMatches.length) olMatches = parseOL(olWide);
@@ -123,45 +266,52 @@ export async function lookupBookMetadata(book, {signal, withVariants = false} = 
     const familyName=norm(book.author).split(' ').filter(Boolean).pop()||'';
     const q=[book.title,familyName].filter(Boolean).join(' ');
     const [olWide,gbWide]=await Promise.all([
-      getJSON(`https://openlibrary.org/search.json?${new URLSearchParams({q,limit:'30',fields})}`,signal),
-      getJSON(`https://www.googleapis.com/books/v1/volumes?${new URLSearchParams({q,maxResults:'25',printType:'books'})}`,signal)
+      getJSON(`https://openlibrary.org/search.json?${new URLSearchParams({q,limit:'30',fields})}`,signal,diagnostics),
+      getJSON(`https://www.googleapis.com/books/v1/volumes?${new URLSearchParams({q,maxResults:'25',printType:'books'})}`,signal,diagnostics)
     ]);
     olSearch ||= olWide;googleSearch ||= gbWide;
     olMatches=parseOL(olWide);gbMatches=parseGB(gbWide);
   }
-  if (!olSearch && !googleSearch) throw new Error('Keine Verbindung zu Open Library oder Google Books');
+  if (!olSearch && !googleSearch && catalogUnavailable(diagnostics)) throw unavailableError(diagnostics);
   let bestOL=olMatches[0]||null,bestGB=gbMatches[0]||null;
   if (!bestOL && !bestGB) return null;
   // Search gives the work/edition. Fetch the full work record for its description.
   let work = null;
-  if (bestOL?.work_key) work = await getJSON(`https://openlibrary.org${bestOL.work_key}.json`, signal);
+  if (bestOL?.work_key && !book.description) work = await getJSON(`https://openlibrary.org${bestOL.work_key}.json`,signal,diagnostics);
   const variants = [];
   const addCover = (url,label='') => {url=safeImage(url);if(url && !variants.some(v=>v.url===url))variants.push({url,label});};
   addCover(bestOL?.cover_url,'Open Library');
   addCover(bestGB?.cover_url,'Google Books');
   for (const x of olMatches.slice(1,5)) addCover(x.cover_url,'Weitere Ausgabe');
   if (withVariants && bestOL?.work_key) {
-    const editions = await getJSON(`https://openlibrary.org${bestOL.work_key}/editions.json?limit=35`,signal);
+    const editions = await getJSON(`https://openlibrary.org${bestOL.work_key}/editions.json?limit=35`,signal,diagnostics);
     for(const ed of editions?.entries||[]) {
       for(const cover of (ed.covers||[]).slice(0,2)) addCover(olCover(cover),year(ed.publish_date)||'Weitere Ausgabe');
       if(variants.length>=8)break;
     }
   }
   const fromWork = shortDescription(olDesc(work?.description));
-  const gbGerman = gbMatches.find(x=>x.description && x.language==='Deutsch');
-  const chosenDescription = gbGerman || (bestGB?.description ? bestGB : null);
-  const description = chosenDescription?.description || fromWork;
+  // Prefer a German edition even if the ISBN-specific edition has only English
+  // or no description. Open Library work text has no reliable language tag.
+  let chosenDescription = bestDescription(book,gbMatches);
+  if(!book.description && (!chosenDescription || chosenDescription.language!=='Deutsch') && (isGerman(book) || !chosenDescription)) {
+    chosenDescription = await findAlternateGoogleDescription(book,signal,diagnostics,gbMatches) || chosenDescription;
+  }
+  const description=chosenDescription?.description || fromWork;
   const descSource = chosenDescription ? chosenDescription.description_source : (fromWork ? 'Open Library' : '');
   const descSourceUrl = chosenDescription ? chosenDescription.description_source_url : (fromWork && bestOL?.work_key ? `https://openlibrary.org${bestOL.work_key}` : '');
   return {
     cover_url:bestOL?.cover_url || bestGB?.cover_url || '',
-    isbn:bestOL?.isbn || bestGB?.isbn || '',
+    isbn: (isbn && (bestGB?.isbns||[]).some(v=>String(v).replace(/[^0-9X]/gi,'')===isbn)) ? isbn : bestOL?.isbn || bestGB?.isbn || '',
     pages:bestOL?.pages || bestGB?.pages || null,
     published_year:bestOL?.published_year || bestGB?.published_year || null,
-    language:bestOL?.language || bestGB?.language || '',
+    language:book.language||bestOL?.language||bestGB?.language||'',
     description,description_source:descSource,description_source_url:descSourceUrl,
     variants:variants.slice(0,8),matched_title:bestOL?.title||bestGB.title,
-    matched_author:bestOL?.author||bestGB.author,confidence:Math.max(bestOL?.score||0,bestGB?.score||0)
+    matched_author:bestOL?.author||bestGB.author,confidence:Math.max(bestOL?.score||0,bestGB?.score||0),
+    description_language:chosenDescription?.language||'',
+    description_status:description?'found':diagnostics.errors.length?'request_failed':'not_in_catalog',
+    lookup_warnings:diagnostics.errors
   };
 }
 
@@ -193,12 +343,13 @@ export async function searchBookCatalog(query, {signal} = {}) {
   const tail=term.match(/[\p{L}]{4,}$/u)?.[0];
   const prefix = !isIsbn && tail ?
     new URLSearchParams({q:`${term.slice(0,-tail.length)}${tail}*`,fields,limit:'30'}) : null;
+  const diagnostics=newDiagnostics();
   const [olData, gbData, prefixData] = await Promise.all([
-    getJSON(`https://openlibrary.org/search.json?${ol}`,signal),
-    getJSON(`https://www.googleapis.com/books/v1/volumes?${gb}`,signal),
-    prefix ? getJSON(`https://openlibrary.org/search.json?${prefix}`,signal) : Promise.resolve(null)
+    getJSON(`https://openlibrary.org/search.json?${ol}`,signal,diagnostics),
+    getJSON(`https://www.googleapis.com/books/v1/volumes?${gb}`,signal,diagnostics),
+    prefix ? getJSON(`https://openlibrary.org/search.json?${prefix}`,signal,diagnostics) : Promise.resolve(null)
   ]);
-  if (!olData && !gbData && !prefixData) throw new Error('Beide Buchkataloge sind momentan nicht erreichbar.');
+  if (!olData && !gbData && !prefixData && catalogUnavailable(diagnostics)) throw unavailableError(diagnostics);
   const all = [];
   for (const d of [...(olData?.docs || []),...(prefixData?.docs || [])]) {
     if (!d.title) continue;
@@ -236,6 +387,7 @@ export async function searchBookCatalog(query, {signal} = {}) {
 // silently substitute the first title/author match from an automatic lookup.
 export async function lookupSelectedCatalogBook(candidate, {signal} = {}) {
   if (!candidate?.title) return null;
+  const diagnostics=newDiagnostics();
   let description = candidate.description || '';
   let description_source = candidate.description_source || '';
   let description_source_url = candidate.description_source_url || '';
@@ -244,8 +396,8 @@ export async function lookupSelectedCatalogBook(candidate, {signal} = {}) {
   add(candidate.cover_url,candidate.source);
   if(candidate.source==='Open Library' && candidate.work_key){
     const [work,editions] = await Promise.all([
-      getJSON(`https://openlibrary.org${candidate.work_key}.json`,signal),
-      getJSON(`https://openlibrary.org${candidate.work_key}/editions.json?limit=35`,signal)
+      getJSON(`https://openlibrary.org${candidate.work_key}.json`,signal,diagnostics),
+      getJSON(`https://openlibrary.org${candidate.work_key}/editions.json?limit=35`,signal,diagnostics)
     ]);
     if (!description) {
       description=shortDescription(olDesc(work?.description));
@@ -256,10 +408,32 @@ export async function lookupSelectedCatalogBook(candidate, {signal} = {}) {
       if(variants.length>=8)break;
     }
   }
+  let description_language = candidate.language||'';
+  if (!description && candidate.source==='Google Books' && candidate.volume_id) {
+    const full=await getJSON(`https://www.googleapis.com/books/v1/volumes/${encodeURIComponent(candidate.volume_id)}`,signal,diagnostics);
+    const detail=full ? volumeCandidate(full) : null;
+    if(detail?.description && matchScore(candidate,detail)>=.75){
+      description=detail.description;
+      description_source=detail.description_source;
+      description_source_url=detail.description_source_url;
+      description_language=detail.language;
+    }
+  }
+  if (!description || (isGerman(candidate) && description_language==='Englisch')) {
+    const otherEdition = await findAlternateGoogleDescription(candidate,signal,diagnostics);
+    if (otherEdition && (!description || otherEdition.language==='Deutsch')) {
+      description=otherEdition.description;
+      description_source=otherEdition.description_source;
+      description_source_url=otherEdition.description_source_url;
+      description_language=otherEdition.language;
+    }
+  }
   return {...candidate,
     cover_url:candidate.cover_url || variants[0]?.url || '',
     variants:variants.slice(0,8),
-    description,description_source,description_source_url,
+    description,description_source,description_source_url,description_language,
+    description_status:description?'found':diagnostics.errors.length?'request_failed':'not_in_catalog',
+    lookup_warnings:diagnostics.errors,
     matched_title:candidate.title,matched_author:candidate.author,
     selected_manually:true
   };
