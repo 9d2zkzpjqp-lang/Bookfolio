@@ -1,4 +1,5 @@
-import { lookupBookMetadata, makeMetadataPatch, missingFields, searchBookCatalog, lookupSelectedCatalogBook } from './metadata.js';
+import { lookupBookMetadata, makeMetadataPatch, missingFields, searchBookCatalog, lookupSelectedCatalogBook } from './metadata.js?v=0.7.9';
+const APP_BUILD='V0.7.9';
 const CONFIG=window.BOOKSHELF_CONFIG||{},SUPABASE_JS_URL='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/+esm',LOCAL_KEY='meine-bibliothek-v02';
 const CURRENT_YEAR=new Date().getFullYear();
 const STATUS_LABELS={all:'Alle',reading:'Lese ich',finished:'Gelesen',unread:'Ungelesen',wishlist:'Wunschliste',abandoned:'Abgebrochen'},FORMAT_LABELS={ebook:'E-Book',print:'Print',audiobook:'Hörbuch'},GENRE_COLORS=['#8b4d28','#c47a4c','#d7a86e','#8a6c57','#b69782','#d4c1ad','#6c5445','#a97758'],MONTHS=['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez'];
@@ -325,7 +326,7 @@ function bindMetadataEvents(){
     else if(action==='choose-candidate')await selectManualMetadataResult(Number(btn.dataset.candidateIndex))
   },true);
 }
-async function boot(){loadLocal();loadLocalQuotes();try{const email=localStorage.getItem('bookfolio-login-email');if(email&&$('#authEmail'))$('#authEmail').value=email;if(email&&$('#passwordLoginEmail'))$('#passwordLoginEmail').value=email}catch{}bindEvents();bindQuoteEvents();bindMetadataEvents();renderAll();await initSupabase();if(!CONFIG.previewMode&&'serviceWorker'in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('./sw.js').catch(()=>{})}
+async function boot(){const buildTag=$('#runtimeBuild');if(buildTag)buildTag.textContent='Programmcode '+APP_BUILD+' aktiv';loadLocal();loadLocalQuotes();try{const email=localStorage.getItem('bookfolio-login-email');if(email&&$('#authEmail'))$('#authEmail').value=email;if(email&&$('#passwordLoginEmail'))$('#passwordLoginEmail').value=email}catch{}bindEvents();bindQuoteEvents();bindMetadataEvents();renderAll();await initSupabase();if(!CONFIG.previewMode&&'serviceWorker'in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('./sw.js').catch(()=>{})}
 
 // Bookfolio V0.7 — private quotes and per-book imports, optional Supabase sync.
 // This file is appended to app.js at build time, sharing the same module scope.

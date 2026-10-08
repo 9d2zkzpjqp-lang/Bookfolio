@@ -1,0 +1,11 @@
+Bookfolio V0.7.9 – Cache-Fix
+============================
+1. Diese ZIP entpacken.
+2. In https://github.com/9d2zkzpjqp-lang/Bookfolio vier Dateien im Hauptverzeichnis ersetzen:
+   index.html, app.js, metadata.js, sw.js.
+3. "Commit changes" und die Pages-Veröffentlichung abwarten.
+4. Safari öffnen, Bookfolio einmal neu laden, dann unter Einstellungen prüfen:
+   "V0.7.9" UND "Programmcode V0.7.9 aktiv".
+5. Danach Clown Town -> Cover & Buchdaten ergänzen erneut prüfen.
+   Falls weiterhin kein Kurzinhalt gefunden wird, ist der Katalog/API-Abruf als Nächstes zu diagnostizieren.
+Keine Datenbankänderungen. Home-Bildschirm-App nicht löschen.

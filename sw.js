@@ -1,4 +1,42 @@
-const CACHE='bookfolio-v078',CORE=['./','./index.html','./styles.css','./app.js','./quote-parser.js','./metadata.js','./config.js','./manifest.webmanifest','./icon.svg','./icon-180.png','./icon-192.png','./icon-512.png'];
-self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(CORE)).then(()=>self.skipWaiting())));
-self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(k=>Promise.all(k.filter(x=>x!==CACHE).map(x=>caches.delete(x)))).then(()=>self.clients.claim())));
-self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=new URL(e.request.url);if(u.origin!==location.origin)return;e.respondWith(e.request.mode==='navigate' ? fetch(e.request).then(r=>{if(r.ok){const c=r.clone();caches.open(CACHE).then(x=>x.put(e.request,c));}return r}).catch(()=>caches.match(e.request)) : caches.match(e.request).then(h=>h||fetch(e.request).then(r=>{if(r.ok){const c=r.clone();caches.open(CACHE).then(x=>x.put(e.request,c));}return r}))) });
+// Bookfolio 0.7.9: versioned URLs + network-first documents/scripts/styles.
+// A new index.html must never run with an older metadata.js/app.js.
+const CACHE='bookfolio-v079';
+const CORE=[
+ './','./index.html','./styles.css?v=0.7.9',
+ './app.js?v=0.7.9','./metadata.js?v=0.7.9',
+ './quote-parser.js?v=0.7.9','./config.js?v=0.7.9',
+ './manifest.webmanifest','./icon.svg','./icon-180.png','./icon-192.png','./icon-512.png'
+];
+const SCOPE_PATH=new URL(self.registration.scope).pathname;
+self.addEventListener('install', event => event.waitUntil((async()=>{
+ const cache=await caches.open(CACHE);
+ await cache.addAll(CORE);
+ await self.skipWaiting();
+})()));
+self.addEventListener('activate', event => event.waitUntil((async()=>{
+ const names=await caches.keys();
+ await Promise.all(names.filter(name=>name.startsWith('bookfolio-')&&name!==CACHE).map(name=>caches.delete(name)));
+ await self.clients.claim();
+})()));
+self.addEventListener('fetch', event => {
+ const request=event.request;
+ if(request.method!=='GET')return;
+ const url=new URL(request.url);
+ if(url.origin!==self.location.origin||!url.pathname.startsWith(SCOPE_PATH))return;
+ const networkFirst=request.mode==='navigate'||/\.(?:html|js|css)$/.test(url.pathname);
+ event.respondWith((async()=>{
+  const cache=await caches.open(CACHE);
+  const fallback=()=>caches.match(request).then(hit=>hit||(request.mode==='navigate'?caches.match('./index.html'):Response.error()));
+  if(networkFirst){
+   try{
+    const response=await fetch(request,{cache:'no-store'});
+    if(response.ok)await cache.put(request,response.clone());
+    return response;
+   }catch{return fallback();}
+  }
+  const stored=await caches.match(request);
+  if(stored)return stored;
+  try{const response=await fetch(request);if(response.ok)await cache.put(request,response.clone());return response;}
+  catch{return fallback();}
+ })());
+});

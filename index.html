@@ -10,7 +10,7 @@
   <title>Bookfolio – Meine Bibliothek</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=0.7.9" />
 </head>
 <body>
   <div id="app" class="app-shell">
@@ -197,12 +197,12 @@
     <div class="settings-card"><h3>Buchdaten & Kurzinhalt</h3><p class="muted small">Fehlende Cover, Seitenzahlen, Erscheinungsjahr und Kurzinhalt bei Open Library und Google Books suchen. Deutschsprachige Ausgaben werden bevorzugt; Abruffehler werden angezeigt. Deine persönlichen Angaben bleiben unverändert. Pro Durchlauf werden höchstens 12 Bücher geprüft.</p><div class="settings-actions"><button class="small-button" data-meta-action="bulk">Fehlende Buchdaten ergänzen</button></div><p id="metadataBatchStatus" class="muted small metadata-progress" role="status" aria-live="polite"></p></div>
     <div class="settings-card"><h3>Markierungen & Zitate</h3><p class="muted small">Tolino-/Notulator-TXT oder Markdown aus Yomu importieren. Kapitel und Quellen bleiben erhalten. Wiederholte Importe legen keine doppelten Zitate an.</p><div class="settings-actions"><button class="small-button" data-quote-action="pick-file">Markierungen importieren</button></div></div>
     <div class="settings-card"><h3>Vollständiges Backup</h3><p class="muted small">Sichert Bücher <strong>und</strong> alle Zitate gemeinsam. Die bisherigen Bücher-JSON-Dateien funktionieren weiterhin.</p><div class="settings-actions"><button class="small-button" data-quote-action="export-full">Komplett sichern</button><label class="small-button file-label">Komplett-Backup einlesen<input type="file" accept=".json" id="backupProxyFile" hidden></label></div></div>
-    <div class="settings-card"><h3>Über diese Version</h3><p class="muted small">V0.7.8 · Ruhigere Kurzinhalt-Anzeige, Quellen nur am Textende. Deutsche Buchbeschreibungen bevorzugt, mehrere Ausgaben, geregelte Anfrageabstände und verständliche API-Fehler. Mit manueller Katalogsuche, E-Mail/Passwort, Kurzinhalt, Coverwahl, Autorenübersicht und Markierungen.</p></div>
+    <div class="settings-card"><h3>Über diese Version</h3><p class="muted small">V0.7.9 · Ruhigere Kurzinhalt-Anzeige, Quellen nur am Textende. Deutsche Buchbeschreibungen bevorzugt, mehrere Ausgaben, geregelte Anfrageabstände und verständliche API-Fehler. Mit manueller Katalogsuche, E-Mail/Passwort, Kurzinhalt, Coverwahl, Autorenübersicht und Markierungen. <span id="runtimeBuild">Programmcode wird geladen …</span></p></div>
   </section>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="config.js"></script>
-  <script src="quote-parser.js"></script>
-  <script type="module" src="app.js"></script>
+  <script src="config.js?v=0.7.9"></script>
+  <script src="quote-parser.js?v=0.7.9"></script>
+  <script type="module" src="app.js?v=0.7.9"></script>
 </body>
 </html>
