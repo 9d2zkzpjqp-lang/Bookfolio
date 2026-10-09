@@ -1,5 +1,5 @@
-import { lookupBookMetadata, makeMetadataPatch, missingFields, searchBookCatalog, lookupSelectedCatalogBook } from './metadata.js?v=0.8.0-rc2';
-const APP_BUILD='V0.8.0-rc2';
+import { lookupBookMetadata, makeMetadataPatch, missingFields, searchBookCatalog, lookupSelectedCatalogBook } from './metadata.js?v=0.8.0-rc3';
+const APP_BUILD='V0.8.0-rc3';
 const CONFIG=window.BOOKSHELF_CONFIG||{},SUPABASE_JS_URL='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/+esm',LOCAL_KEY='meine-bibliothek-v02',RECOVERY_KEY='bookfolio-lokale-rettung-v080';
 const CURRENT_YEAR=new Date().getFullYear();
 const STATUS_LABELS={all:'Alle',reading:'Lese ich',finished:'Gelesen',unread:'Ungelesen',wishlist:'Wunschliste',abandoned:'Abgebrochen'},FORMAT_LABELS={ebook:'E-Book',print:'Print',audiobook:'Hörbuch'},GENRE_COLORS=['#8b4d28','#c47a4c','#d7a86e','#8a6c57','#b69782','#d4c1ad','#6c5445','#a97758'],MONTHS=['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez'];
@@ -16,6 +16,41 @@ const demoBooks=[
 {id:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',title:'The Song of Achilles',author:'Madeline Miller',isbn:'9780062060624',cover_url:'https://covers.openlibrary.org/b/isbn/9780062060624-L.jpg',status:'wishlist',rating:null,pages:378,current_page:0,published_year:2011,started_at:null,finished_at:null,format:'ebook',language:'Englisch',genres:['Roman','Historisch'],notes:'',created_at:'2026-09-27T09:00:00Z'}];
 const state={books:[],activeFilter:'all',activeFormat:'all',activeAuthor:'all',searchQuery:'',sort:'recent',currentView:'library',statsYear:CURRENT_YEAR,activeBookId:null,supabase:null,user:null,syncMode:'local',searchAbort:null,quotes:[],quoteTargetBookId:null,metadataBatchCursor:0,metadataResult:null,metadataBookId:null,metadataCoverChoice:null,metadataBusy:false,metadataBatchBusy:false,metadataManualResults:[],metadataManualQuery:'',metadataManualBusy:false,metadataManualSearched:false,metadataManualError:'',metadataSelectedManually:false,metadataReplaceIdentity:false,metadataManualSeq:0};
 const confirmedBooks=new Map();
+let writesInFlight=0,writeEpoch=0,foregroundRefresh=null,lastForegroundCheck=0,refreshDeferred=false;
+async function trackedWrite(fn){
+  writesInFlight++;writeEpoch++;
+  try{return await fn();}
+  finally{
+    writesInFlight--;writeEpoch++;
+    if(!writesInFlight&&refreshDeferred&&document.visibilityState==='visible')queueMicrotask(()=>void refreshOnForeground());
+  }
+}
+function foregroundBlocked(){
+  return writesInFlight>0||!!document.querySelector('.sheet.open')||
+    !!document.activeElement?.closest('input, textarea, select, [contenteditable="true"]')||
+    state.metadataBusy||state.metadataBatchBusy||state.metadataManualBusy;
+}
+async function refreshOnForeground(){
+  if(document.visibilityState==='hidden'||!state.user||!state.supabase)return false;
+  if(foregroundBlocked()){refreshDeferred=true;return false;}
+  if(foregroundRefresh)return foregroundRefresh;
+  const now=Date.now();
+  if(now-lastForegroundCheck<1500)return false; // visibility/focus/pageshow often fire together
+  lastForegroundCheck=now;refreshDeferred=false;
+  foregroundRefresh=pullFromSupabase({background:true}).catch(error=>{
+    console.warn('Vordergrund-Abgleich fehlgeschlagen',error);return false;
+  }).finally(()=>{foregroundRefresh=null;});
+  return foregroundRefresh;
+}
+function enableForegroundSync(){
+  lastForegroundCheck=Date.now();
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void refreshOnForeground();});
+  window.addEventListener('focus',()=>void refreshOnForeground());
+  window.addEventListener('pageshow',event=>{if(event.persisted)void refreshOnForeground();});
+  window.addEventListener('online',()=>void refreshOnForeground());
+  document.addEventListener('focusout',()=>{if(refreshDeferred)queueMicrotask(()=>void refreshOnForeground());});
+}
+
 const $=(s,r=document)=>r.querySelector(s),$$=(s,r=document)=>[...r.querySelectorAll(s)],esc=(v='')=>String(v).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])),safeDate=v=>v?new Date(`${v}T12:00:00`):null,fmtDate=v=>v?new Intl.DateTimeFormat('de-DE',{day:'numeric',month:'long',year:'numeric'}).format(safeDate(v)):'–',uuid=()=>{if(typeof crypto.randomUUID==='function')return crypto.randomUUID();const a=new Uint8Array(16);crypto.getRandomValues(a);a[6]=(a[6]&15)|64;a[8]=(a[8]&63)|128;const h=[...a].map(x=>x.toString(16).padStart(2,'0')).join('');return[h.slice(0,8),h.slice(8,12),h.slice(12,16),h.slice(16,20),h.slice(20)].join('-')};
 function loadLocal(){try{const x=JSON.parse(localStorage.getItem(LOCAL_KEY)||'null');if(Array.isArray(x)){state.books=x}else{state.books=CONFIG.useDemoData===false?[]:structuredClone(demoBooks)}}catch{state.books=CONFIG.useDemoData===false?[]:structuredClone(demoBooks)}}function saveLocal(){localStorage.setItem(LOCAL_KEY,JSON.stringify(state.books))}function toast(m){const e=$('#toast');e.textContent=m;e.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>e.classList.remove('show'),2200)}
 async function initSupabase(){if(!CONFIG.supabaseUrl||!CONFIG.supabasePublishableKey){updateSyncCard();return}try{const{createClient}=await import(SUPABASE_JS_URL);state.supabase=createClient(CONFIG.supabaseUrl,CONFIG.supabasePublishableKey,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});const{data}=await state.supabase.auth.getSession();state.user=data.session?.user||null;state.supabase.auth.onAuthStateChange((_e,s)=>{state.user=s?.user||null;updateSyncCard()});if(state.user)await pullFromSupabase();updateSyncCard()}catch(e){console.warn(e);state.syncMode='local';updateSyncCard()}}
@@ -43,7 +78,9 @@ function exportLocalRecovery(){
   if(!raw){toast('Keine lokale Rettungskopie vorhanden');return;}
   saveDownload('bookfolio-lokale-rettung.json',raw,'application/json;charset=utf-8');
 }
-async function pullFromSupabase(){
+async function pullFromSupabase({background=false}={}){
+  if(background&&foregroundBlocked()){refreshDeferred=true;return false;}
+  const epoch=writeEpoch;
   if(!state.supabase||!state.user)return false;
   const [bookResult,quoteResult]=await Promise.all([
     state.supabase.from(CONFIG.tableName||'books').select('*').order('created_at',{ascending:false}),
@@ -51,15 +88,22 @@ async function pullFromSupabase(){
   ]);
   if(bookResult.error||quoteResult.error){
     console.warn('Supabase-Abruf fehlgeschlagen',bookResult.error||quoteResult.error);
-    state.syncMode='error';toast('Serverdaten nicht geladen · bitte Verbindung prüfen');updateSyncCard();return false;
+    if(!background){state.syncMode='error';toast('Serverdaten nicht geladen · bitte Verbindung prüfen');updateSyncCard();}
+    return false;
   }
+  if(background&&(writeEpoch!==epoch||foregroundBlocked())){refreshDeferred=true;return false;}
   const remoteBooks=(bookResult.data||[]).map(normalizeBook),remoteQuotes=quoteResult.data||[];
-  saveRecoveryIfNeeded(state.books,state.quotes,remoteBooks,remoteQuotes);
+  // Once synchronized, an earlier server snapshot is not an unsaved local edit.
+  // A remote deletion therefore must not create a misleading recovery backup.
+  if(state.syncMode!=='supabase')saveRecoveryIfNeeded(state.books,state.quotes,remoteBooks,remoteQuotes);
+  const booksChanged=!sameLocalRecords(state.books,remoteBooks);
+  const quotesChanged=!sameLocalRecords(state.quotes,remoteQuotes);
   state.books=remoteBooks;state.quotes=remoteQuotes;state.syncMode='supabase';
   confirmedBooks.clear();for(const b of remoteBooks)confirmedBooks.set(b.id,structuredClone(b));
-  saveLocal();saveLocalQuotes();renderAll();return true;
+  saveLocal();saveLocalQuotes();if(!background||booksChanged||quotesChanged)renderAll();return true;
 }
-async function persistBook(book){
+async function persistBook(book){return trackedWrite(()=>persistBookCore(book));}
+async function persistBookCore(book){
   if(state.supabase&&state.user&&state.syncMode!=='supabase'){const last=confirmedBooks.get(book.id);if(last)Object.assign(book,structuredClone(last));else state.books=state.books.filter(b=>b.id!==book.id);saveLocal();renderAll();toast('Serverdaten noch nicht geladen · Änderung nicht gespeichert');return false;}
   if(!state.supabase||!state.user){saveLocal();return true;}
   const change=structuredClone(book);
@@ -77,7 +121,8 @@ async function persistBook(book){
   }
   confirmedBooks.set(book.id,change);saveLocal();return true;
 }
-async function removeBook(id){
+async function removeBook(id){return trackedWrite(()=>removeBookCore(id));}
+async function removeBookCore(id){
   const book=state.books.find(b=>b.id===id);if(!book)return false;
   if(state.supabase&&state.user){
     if(state.syncMode!=='supabase'){toast('Serverdaten noch nicht geladen · Löschen gesperrt');return false;}
@@ -121,7 +166,7 @@ function editBookInline(){const b=state.books.find(x=>x.id===state.activeBookId)
 function cycleStatus(){const b=state.books.find(x=>x.id===state.activeBookId);if(!b)return;const seq=['unread','reading','finished','wishlist'],i=seq.indexOf(b.status);b.status=seq[(i+1)%seq.length];if(b.status==='reading'&&!b.started_at)b.started_at=new Date().toISOString().slice(0,10);if(b.status==='finished'){b.finished_at=b.finished_at||new Date().toISOString().slice(0,10);b.current_page=b.pages||b.current_page}persistBook(b);renderAll();renderDetail()}
 function renderStats(){const y=state.statsYear;$('#statsYear').textContent=y;const books=state.books.filter(b=>b.finished_at?.startsWith(String(y))&&b.status==='finished'),pages=books.reduce((s,b)=>s+(Number(b.pages)||0),0),ratings=books.filter(b=>Number(b.rating)>0).map(b=>Number(b.rating)),avg=ratings.length?ratings.reduce((a,b)=>a+b,0)/ratings.length:0,durations=books.map(b=>daysBetween(b.started_at,b.finished_at)).filter(n=>Number.isFinite(n)&&n>=0),avgDays=durations.length?Math.round(durations.reduce((a,b)=>a+b,0)/durations.length):0;$('#statsKpis').innerHTML=[['▥',books.length,'Bücher'],['▤',pages.toLocaleString('de-DE'),'Seiten'],['★',avg?avg.toFixed(1).replace('.',','):'–','Ø Bewertung'],['◷',avgDays||'–','Ø Tage pro Buch']].map(([i,v,l])=>`<div class="kpi-card"><div class="kpi-icon">${i}</div><strong>${v}</strong><span>${l}</span></div>`).join('');const counts=Array(12).fill(0);books.forEach(b=>counts[safeDate(b.finished_at).getMonth()]++);const mx=Math.max(...counts,1);$('#monthlyChart').innerHTML=counts.map((v,i)=>`<div class="month-bar-wrap"><span class="month-value">${v||''}</span><div class="month-bar" style="height:${Math.max(2,v/mx*100)}%"></div><span class="month-label">${MONTHS[i]}</span></div>`).join('');const gc={};books.forEach(b=>(b.genres||[]).forEach(g=>gc[g]=(gc[g]||0)+1));const genres=Object.entries(gc).sort((a,b)=>b[1]-a[1]).slice(0,7),gt=genres.reduce((s,[,n])=>s+n,0)||1;let cur=0;const stops=genres.map(([,n],i)=>{const st=cur;cur+=n/gt*100;return`${GENRE_COLORS[i%GENRE_COLORS.length]} ${st}% ${cur}%`});$('#genreDonut').style.background=stops.length?`conic-gradient(${stops.join(',')})`:'conic-gradient(#ddd 0 100%)';$('#genreTotal').textContent=books.length;$('#genreLegend').innerHTML=genres.length?genres.map(([g,n],i)=>`<div class="genre-item"><span class="genre-dot" style="--genre-color:${GENRE_COLORS[i%GENRE_COLORS.length]}"></span><span>${esc(g)}</span><span>${Math.round(n/gt*100)}%</span></div>`).join(''):'<p class="muted small">Noch keine Genre-Daten.</p>';const dist=[5,4,3,2,1].map(r=>[r,books.filter(b=>Math.round(b.rating||0)===r).length]),dm=Math.max(...dist.map(([,n])=>n),1);$('#ratingDistribution').innerHTML=dist.map(([r,n])=>`<div class="rating-row"><span>${r} ★</span><div class="rating-track"><div class="rating-fill" style="width:${n/dm*100}%"></div></div><span>${n}</span></div>`).join('');const fav=[...books].filter(b=>b.rating).sort((a,b)=>(b.rating||0)-(a.rating||0)).slice(0,6);$('#favouriteBooks').innerHTML=fav.length?fav.map(b=>`<div class="favourite-cover" data-book-id="${b.id}">${coverImg(b)}<p>${esc(b.title)}</p></div>`).join(''):'<p class="muted small">Noch keine bewerteten Bücher in diesem Jahr.</p>';const longest=[...books].sort((a,b)=>(b.pages||0)-(a.pages||0))[0],shortest=[...books].filter(b=>b.pages).sort((a,b)=>(a.pages||0)-(b.pages||0))[0],topAuthor=topFrequency(books.map(b=>b.author).filter(Boolean));$('#insightsGrid').innerHTML=[['Meistgelesener Autor',topAuthor||'–'],['Längstes Buch',longest?`${longest.title} · ${longest.pages} S.`:'–'],['Kürzestes Buch',shortest?`${shortest.title} · ${shortest.pages} S.`:'–']].map(([l,v])=>`<div class="insight"><span>${l}</span><strong>${esc(v)}</strong></div>`).join('')}
 function daysBetween(a,b){if(!a||!b)return NaN;return Math.round((safeDate(b)-safeDate(a))/86400000)+1}function topFrequency(a){const c={};a.forEach(x=>c[x]=(c[x]||0)+1);return Object.entries(c).sort((x,y)=>y[1]-x[1])[0]?.[0]}
-function showView(v){state.currentView=v;$$('.view').forEach(x=>x.classList.remove('active'));$(`#${v}View`).classList.add('active');updateNav();scrollTo({top:0,behavior:'smooth'})}function updateNav(){$$('.nav-item[data-nav]').forEach(n=>n.classList.toggle('active',n.dataset.nav===state.currentView))}function openSheet(s){closeOverlays(false);$('#scrim').classList.remove('hidden');const sh=$(s);sh.classList.add('open');sh.setAttribute('aria-hidden','false');document.body.style.overflow='hidden'}function closeOverlays(h=true){$$('.sheet.open').forEach(s=>{s.classList.remove('open');s.setAttribute('aria-hidden','true')});if(h)$('#scrim').classList.add('hidden');document.body.style.overflow=''}
+function showView(v){state.currentView=v;$$('.view').forEach(x=>x.classList.remove('active'));$(`#${v}View`).classList.add('active');updateNav();scrollTo({top:0,behavior:'smooth'})}function updateNav(){$$('.nav-item[data-nav]').forEach(n=>n.classList.toggle('active',n.dataset.nav===state.currentView))}function openSheet(s){closeOverlays(false);$('#scrim').classList.remove('hidden');const sh=$(s);sh.classList.add('open');sh.setAttribute('aria-hidden','false');document.body.style.overflow='hidden'}function closeOverlays(h=true){$$('.sheet.open').forEach(s=>{s.classList.remove('open');s.setAttribute('aria-hidden','true')});if(h)$('#scrim').classList.add('hidden');document.body.style.overflow='';if(h&&refreshDeferred)queueMicrotask(()=>void refreshOnForeground())}
 function switchAddMode(m){$$('.segment').forEach(s=>s.classList.toggle('active',s.dataset.addMode===m));$$('.add-panel').forEach(p=>p.classList.remove('active'));$(`#add${m[0].toUpperCase()+m.slice(1)}Panel`).classList.add('active')}
 function renderSearchResults(results){const box=$('#searchResults');box._results=results;box._coverVariants=null;box.innerHTML=results.length?results.map((r,i)=>`<article class="search-result" data-result-index="${i}">${coverImg(r)}<div><h3>${esc(r.title)}</h3><p>${esc(r.author)}</p><p>${r.published_year||'–'}${r.pages?` · ${r.pages} Seiten`:''}${r._edition_count>1?` · ${r._edition_count} Auflagen`:''}</p></div><span class="chev">›</span></article>`).join(''):'<p class="hint">Keine passenden Bücher gefunden.</p>'}
 async function searchOpenLibrary(q){const box=$('#searchResults');if(q.trim().length<2){box.innerHTML='<p class="hint">Tippe mindestens zwei Zeichen ein.</p>';return}if(state.searchAbort)state.searchAbort.abort();state.searchAbort=new AbortController();box.innerHTML='<div class="search-loading">Suche …</div>';try{const fields='key,title,author_name,first_publish_year,isbn,cover_i,edition_count,number_of_pages_median,language,subject',res=await fetch(`https://openlibrary.org/search.json?q=${encodeURIComponent(q)}&limit=8&fields=${encodeURIComponent(fields)}`,{signal:state.searchAbort.signal});if(!res.ok)throw 0;const j=await res.json(),results=(j.docs||[]).map(d=>({title:d.title,author:(d.author_name||[])[0]||'',published_year:d.first_publish_year||null,isbn:(d.isbn||[])[0]||'',pages:d.number_of_pages_median||null,cover_url:d.cover_i?`https://covers.openlibrary.org/b/id/${d.cover_i}-L.jpg`:'',language:(d.language||[]).includes('ger')?'Deutsch':(d.language||[]).includes('eng')?'Englisch':'',genres:normalizeSubjects(d.subject||[]),_work_key:d.key||'',_cover_id:d.cover_i||null,_edition_count:d.edition_count||0}));renderSearchResults(results)}catch(e){if(e.name!=='AbortError')box.innerHTML='<p class="hint">Die Buchsuche ist gerade nicht erreichbar. Manuelles Hinzufügen funktioniert weiterhin.</p>'}}
@@ -262,7 +307,8 @@ async function importJson(file){
 }
 function bindEvents(){document.addEventListener('click',async e=>{if(e.target.closest('[data-quick-control]'))return;const coverChoice=e.target.closest('[data-cover-choice]');if(coverChoice){const box=$('#searchResults'),variant=box._coverVariants?.[Number(coverChoice.dataset.coverChoice)],resultIndex=box._coverResultIndex;if(variant&&Number.isInteger(resultIndex))await finalizeSearchAdd(resultIndex,variant);return}const authorChoice=e.target.closest('[data-author-open]');if(authorChoice){const name=decodeURIComponent(authorChoice.dataset.authorOpen||'');renderAuthorProfile(name);openSheet('#authorsSheet');return}const authorFilter=e.target.closest('[data-author-filter]');if(authorFilter){state.activeAuthor=decodeURIComponent(authorFilter.dataset.authorFilter||'');closeOverlays();showView('library');renderLibrary();return}const card=e.target.closest('[data-book-id]');if(card){openBook(card.dataset.bookId);return}const result=e.target.closest('[data-result-index]');if(result){await addFromSearch(Number(result.dataset.resultIndex));return}const filter=e.target.closest('[data-filter]');if(filter){state.activeFilter=filter.dataset.filter;renderLibrary();return}const ovs=e.target.closest('[data-overlay-status]');if(ovs){state.activeFilter=ovs.dataset.overlayStatus;renderOverlayFilters();return}const ovf=e.target.closest('[data-overlay-format]');if(ovf){state.activeFormat=ovf.dataset.overlayFormat;renderOverlayFilters();return}const nav=e.target.closest('[data-nav]');if(nav){showView(nav.dataset.nav);return}const seg=e.target.closest('[data-add-mode]');if(seg){switchAddMode(seg.dataset.addMode);return}const a=e.target.closest('[data-action]')?.dataset.action;if(!a)return;if(a==='open-add'){openSheet('#addSheet');setTimeout(()=>$('#bookSearchInput').focus(),300)}else if(a==='open-stats')showView('stats');else if(a==='open-global-search'){renderOverlayFilters();openSheet('#searchSheet');setTimeout(()=>$('#globalSearchInput').focus(),300)}else if(a==='open-settings'){updateSyncCard();openSheet('#settingsSheet')}else if(a==='open-authors'){renderAuthors();openSheet('#authorsSheet')}else if(a==='back-to-authors'){renderAuthors()}else if(a==='clear-author'){state.activeAuthor='all';renderLibrary()}else if(a==='close-overlays'||a==='close-detail')closeOverlays();else if(a==='back-to-search-results'){renderSearchResults($('#searchResults')._results||[])}else if(a==='lookup-isbn')await lookupIsbn();else if(a==='apply-search'){state.searchQuery=$('#globalSearchInput').value;state.sort=$('#sortSelect').value;state.activeAuthor=$('#authorSelect').value;closeOverlays();showView('library');renderLibrary()}else if(a==='stats-prev-year'){state.statsYear--;renderStats()}else if(a==='stats-next-year'){state.statsYear++;renderStats()}else if(a==='edit-book')editBookInline();else if(a==='detail-back')renderDetail();else if(a==='cycle-status')cycleStatus();else if(a==='mark-finished'){const b=state.books.find(x=>x.id===state.activeBookId);if(b){b.status='finished';b.finished_at=b.finished_at||new Date().toISOString().slice(0,10);b.current_page=b.pages||b.current_page;if(await persistBook(b)){renderAll();renderDetail();toast('Als gelesen markiert')}}}else if(a==='delete-book'){if(confirm('Dieses Buch wirklich löschen?'))await removeBook(state.activeBookId)}else if(a==='export-json')exportJson();else if(a==='export-recovery')exportLocalRecovery();else if(a==='sign-out'){if(state.supabase)await state.supabase.auth.signOut();state.user=null;updateSyncCard();toast('Abgemeldet')}else if(a==='book-menu-toggle')$('#bookMenu')?.classList.toggle('hidden');else if(a==='expand-summary'){const text=$('#bookSummaryText'),btn=e.target.closest('[data-action]');if(text){const collapsed=text.classList.toggle('is-collapsed');btn.textContent=collapsed?'Mehr anzeigen':'Weniger anzeigen';btn.setAttribute('aria-expanded',String(!collapsed));const source=$('#bookSummarySource');if(source)source.classList.toggle('hidden',collapsed)}}});document.addEventListener('change',async e=>{const input=e.target.closest('[data-quick-page]');if(!input)return;const b=state.books.find(x=>x.id===input.dataset.quickPage);if(!b)return;let n=Number(input.value);if(!Number.isFinite(n))n=b.current_page||0;n=Math.max(0,Math.round(n));if(b.pages)n=Math.min(n,b.pages);b.current_page=n;if(await persistBook(b)){renderLibrary();toast(`Seite ${n} gespeichert`)}});document.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.matches('[data-quick-page]')){e.preventDefault();e.target.blur()}});let t;$('#bookSearchInput').addEventListener('input',e=>{clearTimeout(t);t=setTimeout(()=>searchOpenLibrary(e.target.value),260)});$('#clearBookSearch').addEventListener('click',()=>{$('#bookSearchInput').value='';$('#searchResults').innerHTML='';$('#bookSearchInput').focus()});$('#manualAddForm').addEventListener('submit',e=>{e.preventDefault();addManual(e.currentTarget)});$('#passwordLoginForm').addEventListener('submit',e=>{e.preventDefault();const email=$('#passwordLoginEmail').value.trim(),pass=$('#passwordLoginPassword').value;signInBookfolioWithPassword(email,pass)});$('#passwordChangeForm').addEventListener('submit',e=>{e.preventDefault();setBookfolioPassword($('#passwordNew').value,$('#passwordConfirm').value)});$('#authForm').addEventListener('submit',e=>{e.preventDefault();const m=$('#authEmail').value.trim();if(m)sendMagicLink(m)});$('#authOtpForm').addEventListener('submit',e=>{e.preventDefault();verifyEmailCode(getAuthEmail(),$('#authOtpCode').value.trim())});$('#authLinkForm').addEventListener('submit',e=>{e.preventDefault();verifyCopiedMagicLink($('#authLinkInput').value.trim())});$('#backupProxyFile').addEventListener('change',e=>{const f=e.target.files?.[0];if(f)importCompleteBackup(f);e.target.value=''});$('#importFile').addEventListener('change',e=>{const f=e.target.files?.[0];if(f)importJson(f);e.target.value=''})}
 
-async function persistMetadataPatch(book,patch){
+async function persistMetadataPatch(book,patch){return trackedWrite(()=>persistMetadataPatchCore(book,patch));}
+async function persistMetadataPatchCore(book,patch){
   if(!Object.keys(patch).length)return false;
   if(state.supabase&&state.user&&state.syncMode!=='supabase')throw Error('Serverdaten konnten nicht geladen werden. Buchdaten wurden nicht geändert.');
   if(state.supabase&&state.user){
@@ -316,12 +362,21 @@ function metadataPatchForCurrent(book,result){
   }
   return patch;
 }
+function diagnosticDetails(diag){
+  if(!diag)return '';
+  const rows=(diag.requests||[]).map(row=>{
+    const stats=row.hits!==null?` · ${row.hits} Treffer${row.described!==null?` · ${row.described} mit Kurzinhalt`:''}`:'';
+    return `<li>${esc(row.provider)} · ${esc(row.kind)} · ${esc(row.status)}${esc(stats)}</li>`;
+  }).join('');
+  const match=diag.matches ? `<p>Als passend eingestuft: Open Library ${Number(diag.matches.openLibrary)||0}, Google Books ${Number(diag.matches.google)||0}. ${Number(diag.matches.googleWithDescription)||0} passende Google-Books-Treffer mit Kurzinhalt.</p>`:'';
+  return `<details class="metadata-lookup-warnings metadata-debug"><summary>Technische Diagnose der Buchsuche</summary><p class="muted small">Nur Abrufe dieses Suchvorgangs; keine Anmeldung oder privaten Lesedaten.</p>${match}<ul>${rows||'<li>Keine API-Anfragen protokolliert.</li>'}</ul></details>`;
+}
 function previewMetadata(){
   const book=state.books.find(b=>b.id===state.metadataBookId),result=state.metadataResult,box=$('#metadataContent');
   if(!book||!box)return;
   const header=`<div class="sheet-header"><div><p class="eyebrow">Buchdaten vervollständigen</p><h2>${esc(book.title)}</h2><p class="muted">${esc(book.author||'')}</p></div><button class="icon-button" data-action="close-overlays" aria-label="Schließen">×</button></div>`;
   const search=manualMetadataSearchHTML();
-  if(!result){box.innerHTML=header+`<p class="hint" role="status">${state.metadataBusy?'Wir suchen passende Ausgaben und bevorzugt deutsche Beschreibungen …':state.metadataLastError?esc(state.metadataLastError):'Kein eindeutig passender Katalogeintrag. Du kannst selbst suchen oder Angaben manuell bearbeiten.'}</p>`+search+(!state.metadataBusy?'<button class="small-button metadata-edit-fallback" data-meta-action="edit">Angaben selbst eingeben</button>':'');return;}
+  if(!result){box.innerHTML=header+`<p class="hint" role="status">${state.metadataBusy?'Wir suchen passende Ausgaben und bevorzugt deutsche Beschreibungen …':state.metadataLastError?esc(state.metadataLastError):'Kein eindeutig passender Katalogeintrag. Du kannst selbst suchen oder Angaben manuell bearbeiten.'}</p>`+search+(state.metadataErrorDiagnostics?diagnosticDetails(state.metadataErrorDiagnostics):'')+(!state.metadataBusy?'<button class="small-button metadata-edit-fallback" data-meta-action="edit">Angaben selbst eingeben</button>':'');return;}
   const selected=state.metadataCoverChoice;
   const choices=result.variants||[];
   const patch=metadataPatchForCurrent(book,result);
@@ -334,11 +389,12 @@ function previewMetadata(){
     : 'In den abgefragten Katalogausgaben war kein Kurzinhalt hinterlegt. Du kannst selbst einen anderen Treffer auswählen.')
     : (result.description_language==='Englisch' && /^(de|ger|deutsch)/i.test(book.language||'')
       ? 'Für diese Ausgabe war nur eine englische Inhaltsangabe verfügbar.' : '');
+  const diagBlock=diagnosticDetails(result.lookup_diagnostics);
   const sourceWarnings = (result.lookup_warnings||[]).length ? `<details class="metadata-lookup-warnings"><summary>Hinweise zu den Buchdatenquellen</summary><p>${(result.lookup_warnings||[]).map(esc).join(' · ')}</p></details>` : '';
   box.innerHTML=header+search+`<div class="metadata-proposal"><p class="hint">${state.metadataSelectedManually?'Du hast gewählt':'Automatisch gefunden'}: <strong>${esc(result.matched_title||'')}</strong> · ${esc(result.matched_author||'')}. Deine Lesedaten, Bewertungen, Notizen und Zitate bleiben unverändert.</p>
     ${identity}
     ${choices.length?`<h3 class="metadata-label">Cover auswählen <span>(optional)</span></h3><div class="metadata-cover-grid"><button class="metadata-cover-choice ${!selected?'selected':''}" data-meta-action="keep-cover"><span class="metadata-cover-old">${book.cover_url?coverImg(book):'—'}</span><small>${book.cover_url?'Bisheriges Cover':'Kein Cover ändern'}</small></button>${choices.slice(0,6).map((c,i)=>`<button class="metadata-cover-choice ${selected===c.url?'selected':''}" data-meta-action="select-cover" data-cover-index="${i}"><img src="${esc(c.url)}" alt="Cover-Variante ${i+1}" loading="lazy"><small>${esc(c.label||'Ausgabe')}</small></button>`).join('')}</div>`:''}
-    <h3 class="metadata-label">Kurzinhalt</h3><div class="metadata-description">${esc(book.description||result.description||'Kein Kurzinhalt verfügbar.')}</div>${descHint?`<p class="muted small" role="status">${esc(descHint)}</p><button type="button" class="small-button metadata-edit-fallback" data-meta-action="edit">Kurzinhalt selbst ergänzen</button>`:''}${result.description_source?`<p class="muted small">Quelle: ${esc(result.description_source)}${book.description?' (eigene vorhandene Beschreibung bleibt)':''}</p>`:''}${sourceWarnings}
+    <h3 class="metadata-label">Kurzinhalt</h3><div class="metadata-description">${esc(book.description||result.description||'Kein Kurzinhalt verfügbar.')}</div>${descHint?`<p class="muted small" role="status">${esc(descHint)}</p><button type="button" class="small-button metadata-edit-fallback" data-meta-action="edit">Kurzinhalt selbst ergänzen</button>`:''}${result.description_source?`<p class="muted small">Quelle: ${esc(result.description_source)}${book.description?' (eigene vorhandene Beschreibung bleibt)':''}</p>`:''}${sourceWarnings}${diagBlock}
     <h3 class="metadata-label">Was wird ergänzt?</h3>${labels?`<ul class="metadata-field-list">${labels}</ul>`:'<p class="hint">Keine fehlenden Angaben gefunden. Wähle oben ein anderes Cover oder optiere für Titel und Autoren.</p>'}
     <button class="primary-button metadata-submit" data-meta-action="apply" ${!labels?'disabled':''}>${labels?'Ausgewählte Buchdaten übernehmen':'Nichts zu ergänzen'}</button></div>`;
 }
@@ -368,10 +424,10 @@ async function selectManualMetadataResult(i){
 }
 async function openMetadataReview(id){
   const book=state.books.find(b=>b.id===id);if(!book)return;
-  state.metadataBookId=id;state.metadataResult=null;state.metadataCoverChoice=null;state.metadataBusy=true;state.metadataLastError='';state.metadataManualResults=[];state.metadataManualQuery='';state.metadataManualBusy=false;state.metadataManualSearched=false;state.metadataManualError='';state.metadataSelectedManually=false;state.metadataReplaceIdentity=false;++state.metadataManualSeq;
+  state.metadataBookId=id;state.metadataResult=null;state.metadataCoverChoice=null;state.metadataBusy=true;state.metadataLastError='';state.metadataErrorDiagnostics=null;state.metadataManualResults=[];state.metadataManualQuery='';state.metadataManualBusy=false;state.metadataManualSearched=false;state.metadataManualError='';state.metadataSelectedManually=false;state.metadataReplaceIdentity=false;++state.metadataManualSeq;
   openSheet('#metadataSheet');previewMetadata();
   try{const result=await lookupBookMetadata(book,{withVariants:true});if(state.metadataBookId!==id)return;state.metadataResult=result;}
-  catch(err){console.warn(err);state.metadataLastError=err.message||'Buchdaten konnten nicht abgerufen werden';toast('Suche derzeit nicht möglich')}
+  catch(err){console.warn(err);state.metadataLastError=err.message||'Buchdaten konnten nicht abgerufen werden';state.metadataErrorDiagnostics=err.diagnostics||null;toast('Suche derzeit nicht möglich')}
   finally{if(state.metadataBookId===id){state.metadataBusy=false;previewMetadata()}}
 }
 async function applyMetadataReview(){
@@ -427,7 +483,7 @@ function bindMetadataEvents(){
     else if(action==='choose-candidate')await selectManualMetadataResult(Number(btn.dataset.candidateIndex))
   },true);
 }
-async function boot(){const buildTag=$('#runtimeBuild');if(buildTag)buildTag.textContent='Programmcode '+APP_BUILD+' aktiv';loadLocal();loadLocalQuotes();try{const email=localStorage.getItem('bookfolio-login-email');if(email&&$('#authEmail'))$('#authEmail').value=email;if(email&&$('#passwordLoginEmail'))$('#passwordLoginEmail').value=email}catch{}bindEvents();bindQuoteEvents();bindMetadataEvents();renderAll();await initSupabase();if(!CONFIG.previewMode&&'serviceWorker'in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('./sw.js').catch(()=>{})}
+async function boot(){const buildTag=$('#runtimeBuild');if(buildTag)buildTag.textContent='Programmcode '+APP_BUILD+' aktiv';loadLocal();loadLocalQuotes();try{const email=localStorage.getItem('bookfolio-login-email');if(email&&$('#authEmail'))$('#authEmail').value=email;if(email&&$('#passwordLoginEmail'))$('#passwordLoginEmail').value=email}catch{}bindEvents();bindQuoteEvents();bindMetadataEvents();renderAll();await initSupabase();enableForegroundSync();if(!CONFIG.previewMode&&'serviceWorker'in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('./sw.js').catch(()=>{})}
 
 // Bookfolio V0.7 — private quotes and per-book imports, optional Supabase sync.
 // This file is appended to app.js at build time, sharing the same module scope.
@@ -443,7 +499,8 @@ async function pullQuotesFromSupabase(){
   if(error){console.warn(error);toast('Zitate konnten nicht geladen werden');return false;}
   state.quotes=data||[];saveLocalQuotes();return true;
 }
-async function saveQuotes(quotes){
+async function saveQuotes(quotes){return trackedWrite(()=>saveQuotesCore(quotes));}
+async function saveQuotesCore(quotes){
   if(state.supabase&&state.user){
     if(state.syncMode!=='supabase'){toast('Serverdaten noch nicht geladen · Zitate nicht gespeichert');return false;}
     const payload=quotes.map(q=>({...q,user_id:state.user.id}));
@@ -453,7 +510,8 @@ async function saveQuotes(quotes){
   state.quotes.push(...quotes);saveLocalQuotes();
   return true;
 }
-async function removeQuote(id){
+async function removeQuote(id){return trackedWrite(()=>removeQuoteCore(id));}
+async function removeQuoteCore(id){
   const q=state.quotes.find(q=>q.id===id);if(!q)return;
   if(state.supabase&&state.user&&state.syncMode!=='supabase'){toast('Serverdaten noch nicht geladen · Löschen gesperrt');return false;}
   if(state.supabase&&state.user){

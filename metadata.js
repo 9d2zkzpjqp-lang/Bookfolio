@@ -82,12 +82,33 @@ function recordIssue(diagnostics, provider, reason, retryable=false) {
   if(!diagnostics.errors.includes(message))diagnostics.errors.push(message);
   if(retryable)diagnostics.retryable=true;
 }
-const newDiagnostics=()=>({errors:[],retryable:false,successful:0});
+const newDiagnostics=()=>({errors:[],retryable:false,successful:0,requests:[]});
+function traceRequest(diagnostics,url){
+  if(!diagnostics)return null;
+  const u=new URL(url),provider=originName(url);
+  const kind=u.pathname.endsWith('/search.json')?'Treffersuche':
+    /\/volumes\/[^/]+$/.test(u.pathname)?'Vollständiger Buchdatensatz':
+    u.pathname.endsWith('/volumes')?'Treffersuche':
+    u.pathname.endsWith('/editions.json')?'Ausgabenliste':'Werkbeschreibung';
+  const row={provider:providerName(provider),kind,status:'Ausstehend',hits:null,described:null};
+  if(diagnostics.requests.length<40)diagnostics.requests.push(row);
+  return row;
+}
+function finishTrace(row,data,status){
+  if(!row)return;
+  row.status=status;
+  const entries=data?.items||data?.docs||data?.entries;
+  if(Array.isArray(entries)){
+    row.hits=entries.length;
+    row.described=entries.filter(item=>!!(item.volumeInfo?.description||item.description)).length;
+  }else if(data){row.hits=1;row.described=Number(!!(data.volumeInfo?.description||data.description));}
+}
 const isGerman = book=>/^(de|ger|deutsch)/i.test(String(book?.language||''));
 
 async function getJSON(url, signal, diagnostics=null) {
+  const trace=traceRequest(diagnostics,url);
   const cached=responseCache.get(url);
-  if(cached && Date.now()-cached.at<10*60*1000){if(diagnostics)diagnostics.successful++;return cached.data;}
+  if(cached && Date.now()-cached.at<10*60*1000){if(diagnostics)diagnostics.successful++;finishTrace(trace,cached.data,'Cache');return cached.data;}
   const provider=originName(url);
   for(let attempt=0;attempt<3;attempt++){
     if(signal?.aborted)throw new DOMException('Abgebrochen','AbortError');
@@ -98,12 +119,13 @@ async function getJSON(url, signal, diagnostics=null) {
     signal?.addEventListener('abort',abort,{once:true});
     try{
       const response=await fetch(url,{signal:controller.signal,headers:{Accept:'application/json'}});
-      if(response.status===404)return null;
+      if(response.status===404){finishTrace(trace,null,'HTTP 404');return null;}
       if(response.ok){
         const data=await response.json();
         if(responseCache.size>120)responseCache.delete(responseCache.keys().next().value);
         responseCache.set(url,{at:Date.now(),data});
         if(diagnostics)diagnostics.successful++;
+        finishTrace(trace,data,'HTTP '+response.status);
         return data;
       }
       if([429,502,503,504].includes(response.status) && attempt<2){
@@ -111,12 +133,14 @@ async function getJSON(url, signal, diagnostics=null) {
         const retryDelay=Number.isFinite(retryHeader)&&retryHeader>0 ? Math.min(retryHeader*1000,6000) : 900*(attempt+1);
         await wait(retryDelay);continue;
       }
+      finishTrace(trace,null,'HTTP '+response.status);
       recordIssue(diagnostics,provider,response.status===429?'Zugriffslimit erreicht':`HTTP ${response.status}`,[429,502,503,504].includes(response.status));
       return null;
     }catch(err){
       if(signal?.aborted)throw err;
       const timeoutHit=controller.signal.aborted;
       if(attempt<2){await wait(800*(attempt+1));continue;}
+      finishTrace(trace,null,timeoutHit?'Zeitüberschreitung':'Netzwerkfehler');
       recordIssue(diagnostics,provider,timeoutHit?'Zeitüberschreitung':'Netzwerkfehler',true);
       return null;
     }finally{
@@ -168,7 +192,8 @@ function catalogUnavailable(diagnostics){
   return diagnostics.successful===0 && diagnostics.errors.length>0;
 }
 function unavailableError(diagnostics){
-  return new Error(`Buchkataloge nicht erreichbar (${diagnostics.errors.join('; ')}). Bitte später erneut versuchen.`);
+  const err=new Error(`Buchkataloge nicht erreichbar (${diagnostics.errors.join('; ')}). Bitte später erneut versuchen.`);
+  err.diagnostics=diagnostics;return err;
 }
 
 // The ISBN often identifies an edition whose catalogue record has no blurb.
@@ -311,7 +336,9 @@ export async function lookupBookMetadata(book, {signal, withVariants = false} = 
     matched_author:bestOL?.author||bestGB.author,confidence:Math.max(bestOL?.score||0,bestGB?.score||0),
     description_language:chosenDescription?.language||'',
     description_status:description?'found':diagnostics.errors.length?'request_failed':'not_in_catalog',
-    lookup_warnings:diagnostics.errors
+    lookup_warnings:diagnostics.errors,
+    lookup_diagnostics:{requests:diagnostics.requests,matches:{openLibrary:olMatches.length,google:gbMatches.length,
+      googleWithDescription:gbMatches.filter(x=>x.description).length}}
   };
 }
 
