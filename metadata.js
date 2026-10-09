@@ -1,4 +1,4 @@
-// Bookfolio V0.7.8: German-first catalogue lookup with full volume-detail fallback.
+// Bookfolio V0.8.0 RC5: German-first catalogue lookup with provider-aware HTTP 429 pause.
 // Requests contain bibliographic information only; no account keys or reading notes.
 const FIELDS = ['cover_url', 'isbn', 'pages', 'published_year', 'language', 'description'];
 export const META_FIELDS = FIELDS;
@@ -60,12 +60,32 @@ export function makeMetadataPatch(book, candidate, { selectedCover = null, repla
 // anonymous Open Library limit instead, even for overlapping book lookups.
 const queued = { openLibrary:Promise.resolve(), google:Promise.resolve() };
 const nextRequest = { openLibrary:0, google:0 };
+// Google's anonymous API can return HTTP 429 across independent title lookups.
+// One denied request should not cause further searches or immediate retries.
+const GOOGLE_PAUSE_KEY='bookfolio-google-books-paused-until';
+let googlePauseUntil=0;
+function googlePauseRemaining(){
+  let stored=0;
+  try{stored=Number(localStorage.getItem(GOOGLE_PAUSE_KEY))||0;}catch{}
+  const until=Math.max(googlePauseUntil,stored);
+  return Math.max(0,until-Date.now());
+}
+function pauseGoogle(response){
+  const value=response.headers?.get?.('Retry-After');
+  const numeric=Number(value);
+  const delay= value && Number.isFinite(numeric) && numeric>0 ? numeric*1000 :
+    value && Number.isFinite(Date.parse(value)) ? Date.parse(value)-Date.now() : 0;
+  // 15 minutes unless the provider asks us to wait longer (max. 1 hour).
+  const milliseconds=Math.min(60*60*1000,Math.max(15*60*1000,delay||0));
+  googlePauseUntil=Date.now()+milliseconds;
+  try{localStorage.setItem(GOOGLE_PAUSE_KEY,String(googlePauseUntil));}catch{}
+}
 const responseCache=new Map();
 const wait = ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const originName = url=>new URL(url).hostname.includes('openlibrary.org')?'openLibrary':'google';
 const providerName = name=>name==='openLibrary'?'Open Library':'Google Books';
 function throttle(provider, signal) {
-  const delay = provider==='openLibrary' ? 1200 : 300;
+  const delay = provider==='openLibrary' ? 1200 : 800;
   const turn = queued[provider].catch(()=>{}).then(async()=>{
     if(signal?.aborted)throw new DOMException('Abgebrochen','AbortError');
     const remaining=Math.max(0,nextRequest[provider]-Date.now());
@@ -106,13 +126,35 @@ function finishTrace(row,data,status){
 const isGerman = book=>/^(de|ger|deutsch)/i.test(String(book?.language||''));
 
 async function getJSON(url, signal, diagnostics=null) {
-  const trace=traceRequest(diagnostics,url);
-  const cached=responseCache.get(url);
-  if(cached && Date.now()-cached.at<10*60*1000){if(diagnostics)diagnostics.successful++;finishTrace(trace,cached.data,'Cache');return cached.data;}
   const provider=originName(url);
+  const cached=responseCache.get(url);
+  if(cached && Date.now()-cached.at<10*60*1000){
+    const trace=traceRequest(diagnostics,url);
+    if(diagnostics)diagnostics.successful++;
+    finishTrace(trace,cached.data,'Cache');
+    return cached.data;
+  }
+  const paused=()=>provider==='google'&&googlePauseRemaining()>0;
+  const pausedResult=()=>{
+    if(!diagnostics?.googlePauseReported){
+      const row=traceRequest(diagnostics,url);
+      finishTrace(row,null,'Google Books pausiert (HTTP 429)');
+      if(diagnostics)diagnostics.googlePauseReported=true;
+    }
+    recordIssue(diagnostics,'google','HTTP 429 – Zugriffslimit; 15 Minuten pausiert. Bitte später erneut suchen.',true);
+    return null;
+  };
+  if(paused())return pausedResult();
+  const trace=traceRequest(diagnostics,url);
   for(let attempt=0;attempt<3;attempt++){
     if(signal?.aborted)throw new DOMException('Abgebrochen','AbortError');
     await throttle(provider,signal);
+    // Other requests may have received 429 while this one was queued.
+    if(paused()){
+      finishTrace(trace,null,'Wegen HTTP 429 nicht gesendet');
+      recordIssue(diagnostics,'google','HTTP 429 – Zugriffslimit; 15 Minuten pausiert. Bitte später erneut suchen.',true);
+      return null;
+    }
     const controller=new AbortController();
     const timeout=setTimeout(()=>controller.abort(),8500);
     const abort=()=>controller.abort();
@@ -127,6 +169,12 @@ async function getJSON(url, signal, diagnostics=null) {
         if(diagnostics)diagnostics.successful++;
         finishTrace(trace,data,'HTTP '+response.status);
         return data;
+      }
+      if(response.status===429 && provider==='google'){
+        pauseGoogle(response);
+        finishTrace(trace,null,'HTTP 429');
+        recordIssue(diagnostics,provider,'HTTP 429 – Zugriffslimit; 15 Minuten pausiert. Bitte später erneut suchen.',true);
+        return null;
       }
       if([429,502,503,504].includes(response.status) && attempt<2){
         const retryHeader=Number(response.headers?.get?.('Retry-After'));
@@ -208,7 +256,7 @@ async function getFullGoogleDescription(book, candidates, signal, diagnostics) {
     .sort((a,b) => Number(b.language==='Deutsch')-Number(a.language==='Deutsch') || matchScore(book,b)-matchScore(book,a));
   let best = null;
   for (const candidate of matches) {
-    if (seen.size >= 8 || signal?.aborted) break;
+    if (seen.size >= 8 || signal?.aborted || googlePauseRemaining()>0) break;
     if (seen.has(candidate.volume_id)) continue;
     seen.add(candidate.volume_id);
     if (!/^[\w-]+$/.test(candidate.volume_id)) continue;
@@ -235,7 +283,7 @@ async function findAlternateGoogleDescription(book,signal,diagnostics=newDiagnos
   ];
   const candidates=[...startingCandidates];
   for(const params of queries){
-    if(signal?.aborted)break;
+    if(signal?.aborted || googlePauseRemaining()>0)break;
     if(!params.q.trim())continue;
     const search=await getJSON(`https://www.googleapis.com/books/v1/volumes?${new URLSearchParams({...params,maxResults:'30',printType:'books'})}`,signal,diagnostics);
     const editions=(search?.items||[]).map(volumeCandidate);
