@@ -308,3 +308,8 @@ body:has(.sheet.open) .bottom-nav { visibility:hidden; opacity:0; pointer-events
 /* RC7 desktop repair: a translated closed sheet is NOT necessarily offscreen.
    Prevent inactive sheets from painting on top of the active modal. */
 .sheet:not(.open){visibility:hidden;pointer-events:none;}
+
+/* RC8: paragraphs and long text in catalogue descriptions stay readable. */
+.summary-text { max-width: 72ch; overflow-wrap: break-word; }
+.apple-add-description p { white-space: pre-line; overflow-wrap: break-word; }
+.metadata-description { overflow-wrap: break-word; }

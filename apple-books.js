@@ -1,3 +1,4 @@
+import { normalizeBookDescription } from './description-text.js?v=0.8.0-rc8';
 // Bookfolio RC7 – Apple Books via the public iTunes Search API (JSONP).
 // JSONP is needed for browser/Safari compatibility, including installed PWAs.
 // Queries contain title/author/ISBN search terms only. No Supabase credentials.
@@ -79,10 +80,8 @@ export function appleCandidate(item){
   const image=httpsUrl(original.replace(/100x100bb(?=\.)/,'600x600bb').replace(/100x100-75(?=\.)/,'600x600bb'));
   const title=String(item.trackName||item.collectionName||'').trim();
   const rawDescription=String(item.description||'');
-  // Strip catalogue HTML without injecting markup into Bookfolio.
-  const description=rawDescription.replace(/<[^>]*>/g,' ').replace(/&nbsp;|&#160;/gi,' ').replace(/&amp;/gi,'&')
-    .replace(/&quot;/gi,'"').replace(/&#39;|&apos;/gi,"'")
-    .replace(/&lt;/gi,'<').replace(/&gt;/gi,'>').replace(/\s+/g,' ').trim().slice(0,4000);
+  // Decode numeric and named HTML entities; preserve catalogue paragraphs.
+  const description=normalizeBookDescription(rawDescription).slice(0,4000);
   const displayAuthor=appleAuthor(item);
   const knownLanguage=String(item.language||'').toLowerCase();
   return {source:'Apple Books',title,author:displayAuthor,authors:displayAuthor?[displayAuthor]:[],

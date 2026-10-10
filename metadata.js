@@ -1,14 +1,12 @@
-import { queryAppleBooks, appleCandidate, appleMatch } from './apple-books.js?v=0.8.0-rc7';
+import { normalizeBookDescription } from './description-text.js?v=0.8.0-rc8';
+import { queryAppleBooks, appleCandidate, appleMatch } from './apple-books.js?v=0.8.0-rc8';
 // Bookfolio V0.8.0 RC5: German-first catalogue lookup with provider-aware HTTP 429 pause.
 // Requests contain bibliographic information only; no account keys or reading notes.
 const FIELDS = ['cover_url', 'isbn', 'pages', 'published_year', 'language', 'description'];
 export const META_FIELDS = FIELDS;
 
 export function cleanText(value) {
-  const plain = String(value || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;|&#160;/gi, ' ')
-    .replace(/&amp;/gi, '&').replace(/&quot;/gi, '"').replace(/&#39;|&apos;/gi, "'")
-    .replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/\s+/g, ' ').trim();
-  return plain;
+  return normalizeBookDescription(value).replace(/\s+/g, ' ').trim();
 }
 export function shortDescription(input, limit = 520) {
   const text = cleanText(input);
