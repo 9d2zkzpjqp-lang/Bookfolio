@@ -209,3 +209,102 @@
 .metadata-proposal{padding-bottom:8px}
 @media(max-width:400px){.metadata-manual-section{padding:14px 11px}.metadata-search-form input{font-size:16px;padding:12px 9px}.metadata-search-form .small-button{padding:10px}.metadata-search-result{gap:10px}}
 .sr-only{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+
+/* Desktop-Beruhigung für Mac/Browser */
+@media (min-width: 900px) {
+  .main-content {
+    padding-bottom: 84px;
+  }
+
+  .bottom-nav {
+    width: min(560px, calc(100% - 44px));
+    bottom: 18px;
+    border-radius: 18px;
+    padding: 6px;
+    background: rgba(255, 253, 249, 0.93);
+    box-shadow: 0 8px 24px rgba(55, 39, 26, 0.10);
+    backdrop-filter: blur(18px) saturate(1.05);
+  }
+
+  .nav-item {
+    border-radius: 14px;
+    padding-top: 8px;
+    padding-bottom: 7px;
+  }
+
+  .sheet {
+    top: 50%;
+    bottom: auto;
+    max-height: min(86vh, 920px);
+    border-radius: 28px;
+    padding-top: 20px;
+    transform: translate(-50%, calc(100% + 48px));
+    box-shadow: 0 24px 70px rgba(35, 25, 18, 0.14);
+  }
+
+  .sheet.open {
+    transform: translate(-50%, -50%);
+  }
+
+  .sheet-handle {
+    display: none;
+  }
+
+  body.overlay-open .bottom-nav {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(-50%) translateY(10px);
+  }
+}
+
+
+/* RC6: Katalogtreffer sind echte Schaltflächen. */
+.search-result { width:100%; text-align:left; color:inherit; font:inherit; background:transparent; }
+.search-result:focus-visible { outline:3px solid rgba(139,77,40,.38); outline-offset:2px; background:#f2ece5; }
+.search-result-title { display:block; font-size:.95rem; font-weight:700; margin-bottom:4px; }
+.search-result-author,.search-result-meta { display:block; color:var(--muted); font-size:.78rem; line-height:1.45; }
+.catalog-fallback { margin:14px 0 2px; padding:14px 10px 10px; border-top:1px solid var(--line); }
+.catalog-fallback .hint { margin:0 0 10px; }
+
+/* Hide navigation behind any open dialog at every viewport size. */
+body.overlay-open .bottom-nav,
+body:has(.sheet.open) .bottom-nav { visibility:hidden; opacity:0; pointer-events:none; }
+
+/* Mac and other pointer-driven desktop browsers: navigation belongs at the top. */
+@media (min-width:680px) and (hover:hover) and (pointer:fine) {
+  .main-content { padding-top:105px; padding-bottom:50px; }
+  .bottom-nav {
+    top:14px; bottom:auto; left:50%; right:auto;
+    width:min(580px,calc(100% - 36px));
+    padding:6px; border-radius:18px;
+    transform:translateX(-50%);
+    box-shadow:0 5px 20px rgba(55,39,26,.11);
+    background:rgba(255,253,249,.94);
+  }
+  .sheet {
+    top:50%; bottom:auto; max-height:min(86dvh,920px);
+    padding-top:21px; border-radius:25px;
+    transform:translate(-50%,calc(100% + 60px));
+  }
+  .sheet.open { transform:translate(-50%,-50%); }
+  .sheet-handle { display:none; }
+  .scrim { backdrop-filter:blur(3px); }
+}
+
+/* RC7: ruhige Vorschau bei neuen Apple-Books-Treffern */
+.apple-add-preview{display:grid;grid-template-columns:minmax(105px,34%) minmax(0,1fr);align-items:start;gap:20px;background:#f9f5ef;border:1px solid var(--line);border-radius:19px;padding:17px;margin:16px 0;}
+.apple-add-preview-cover img{display:block;width:100%;max-height:310px;object-fit:contain;border-radius:7px;box-shadow:0 9px 23px rgba(36,26,19,.17);}
+.apple-add-preview-info h3{font-size:1.2rem;line-height:1.18;margin:0 0 5px;}
+.apple-add-preview-info .eyebrow{margin-bottom:9px;}
+.apple-add-description{margin:14px 0;font-size:.9rem;color:var(--ink);line-height:1.5;}
+.apple-add-description summary{font-weight:700;cursor:pointer;margin-bottom:9px;}
+.apple-add-description p{font-size:.88rem;line-height:1.6;margin:8px 0;max-height:210px;overflow-y:auto;}
+.apple-add-link{display:inline-block;margin-top:2px;color:var(--accent);font-size:.82rem;text-decoration:none;}
+.apple-add-link:hover{text-decoration:underline;}
+.apple-add-confirm{width:100%;}
+@media(max-width:480px){.apple-add-preview{grid-template-columns:105px minmax(0,1fr);gap:13px;padding:12px}.apple-add-preview-info h3{font-size:1rem}.apple-add-description p{max-height:160px}}
+
+/* RC7 desktop repair: a translated closed sheet is NOT necessarily offscreen.
+   Prevent inactive sheets from painting on top of the active modal. */
+.sheet:not(.open){visibility:hidden;pointer-events:none;}

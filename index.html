@@ -10,7 +10,7 @@
   <title>Bookfolio – Meine Bibliothek</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="styles.css?v=0.8.0-rc5" />
+  <link rel="stylesheet" href="styles.css?v=0.8.0-rc7" />
 </head>
 <body>
   <div id="app" class="app-shell">
@@ -115,9 +115,9 @@
     <div class="sheet-header"><div><p class="eyebrow">Schnell hinzufügen</p><h2>Neues Buch</h2></div><button class="icon-button" data-action="close-overlays" aria-label="Schließen">×</button></div>
     <div class="search-box"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4.2 4.2"></path></svg><input id="bookSearchInput" type="search" autocomplete="off" placeholder="Titel oder Autor …" /><button id="clearBookSearch" class="clear-button" aria-label="Suche leeren">×</button></div>
     <div class="segmented-control"><button class="segment active" data-add-mode="search">Suche</button><button class="segment" data-add-mode="isbn">ISBN</button><button class="segment" data-add-mode="manual">Manuell</button></div>
-    <div id="addSearchPanel" class="add-panel active"><p class="hint">Für Apple Books reicht meist ein Teil von Titel oder Autor.</p><div id="searchResults" class="search-results"></div></div>
+    <div id="addSearchPanel" class="add-panel active"><p class="hint">Suche nach Titel oder Autor. Bookfolio zeigt Cover und Kurzinhalt vor dem Hinzufügen.</p><div id="searchResults" class="search-results"></div></div>
     <div id="addIsbnPanel" class="add-panel"><div class="manual-form compact-form"><label>ISBN<input id="isbnInput" inputmode="numeric" placeholder="978…" /></label><button class="primary-button" data-action="lookup-isbn">ISBN suchen</button></div></div>
-    <div id="addManualPanel" class="add-panel"><form id="manualAddForm" class="manual-form"><label>Titel<input name="title" required /></label><label>Autor<input name="author" /></label><div class="form-grid-two"><label>Seiten<input name="pages" type="number" min="0" /></label><label>Erscheinungsjahr<input name="published_year" type="number" min="0" max="2100" /></label></div><label>Cover-URL<input name="cover_url" type="url" placeholder="https://…" /></label><button class="primary-button" type="submit">Zur Bibliothek hinzufügen</button></form></div>
+    <div id="addManualPanel" class="add-panel"><form id="manualAddForm" class="manual-form"><label>Titel<input name="title" required /></label><label>Autor<input name="author" /></label><label>ISBN der eigenen Ausgabe (optional)<input name="isbn" type="text" inputmode="numeric" placeholder="978…" /></label><div class="form-grid-two"><label>Seiten<input name="pages" type="number" min="0" /></label><label>Erscheinungsjahr<input name="published_year" type="number" min="0" max="2100" /></label></div><label>Cover-URL<input name="cover_url" type="url" placeholder="https://…" /></label><button class="primary-button" type="submit">Zur Bibliothek hinzufügen</button></form></div>
   </section>
 
   <section id="searchSheet" class="sheet" aria-hidden="true">
@@ -194,15 +194,15 @@
       <button id="signOutButton" class="text-button hidden" data-action="sign-out">Abmelden</button>
     </div>
     <div class="settings-card"><h3>Daten sichern & übernehmen</h3><p class="muted small">Der JSON-Import ergänzt deine Bibliothek, ohne vorhandene Bücher zu ersetzen. ISBN und Titel/Autor werden auf Dubletten geprüft. Bei bestehender Anmeldung werden neue Bücher zu Supabase übertragen.</p><div class="settings-actions"><button class="small-button" data-action="export-json">JSON exportieren</button><label class="small-button file-label">Bücher importieren<input id="importFile" type="file" accept=".json,application/json" hidden /></label></div></div>
-    <div class="settings-card"><h3>Buchdaten & Kurzinhalt</h3><p class="muted small">Fehlende Cover, Seitenzahlen, Erscheinungsjahr und Kurzinhalt bei Open Library und Google Books suchen. Deutschsprachige Ausgaben werden bevorzugt; Abruffehler werden angezeigt. Deine persönlichen Angaben bleiben unverändert. Pro Durchlauf werden höchstens 12 Bücher geprüft.</p><div class="settings-actions"><button class="small-button" data-meta-action="bulk">Fehlende Buchdaten ergänzen</button></div><p id="metadataBatchStatus" class="muted small metadata-progress" role="status" aria-live="polite"></p></div>
+    <div class="settings-card"><h3>Buchdaten & Kurzinhalt</h3><p class="muted small">Fehlende Cover und Kurzbeschreibungen zuerst bei Apple Books suchen. Open Library ergänzt weitere Buchdaten; Google Books ist nur eine zusätzliche Rückfallquelle. Abruffehler werden angezeigt. Deine persönlichen Angaben bleiben unverändert. Pro Durchlauf werden höchstens 12 Bücher geprüft.</p><div class="settings-actions"><button class="small-button" data-meta-action="bulk">Fehlende Buchdaten ergänzen</button></div><p id="metadataBatchStatus" class="muted small metadata-progress" role="status" aria-live="polite"></p></div>
     <div class="settings-card"><h3>Markierungen & Zitate</h3><p class="muted small">Tolino-/Notulator-TXT oder Markdown aus Yomu importieren. Kapitel und Quellen bleiben erhalten. Wiederholte Importe legen keine doppelten Zitate an.</p><div class="settings-actions"><button class="small-button" data-quote-action="pick-file">Markierungen importieren</button></div></div>
     <div class="settings-card"><h3>Vollständiges Backup</h3><p class="muted small">Sichert Bücher <strong>und</strong> alle Zitate gemeinsam. Ein Import <strong>ergänzt nur fehlende Einträge</strong>, überschreibt aber keine vorhandenen Daten und setzt die Bibliothek nicht auf einen früheren Stand zurück.</p><div class="settings-actions"><button class="small-button" data-quote-action="export-full">Komplett sichern</button><label class="small-button file-label">Backup ergänzen<input type="file" accept=".json" id="backupProxyFile" hidden></label></div></div>
-    <div class="settings-card"><h3>Über diese Version</h3><p class="muted small">V0.8.0-rc5 · Synchronisation beim Zurückkehren, Mac-Dialoge und Diagnose der Buchsuche. Google-Books-Zugriffslimits werden beachtet. <span id="runtimeBuild">Programmcode wird geladen …</span></p></div>
+    <div class="settings-card"><h3>Über diese Version</h3><p class="muted small">V0.8.0-rc7 · Apple Books für Cover und Kurzinhalt ergänzt. Buchauswahl mit Vorschau, Open Library als Ergänzung und Google Books als Rückfallquelle. Synchronisation und Backups unverändert. <span id="runtimeBuild">Programmcode wird geladen …</span></p></div>
   </section>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="config.js?v=0.8.0-rc5"></script>
-  <script src="quote-parser.js?v=0.8.0-rc5"></script>
-  <script type="module" src="app.js?v=0.8.0-rc5"></script>
+  <script src="config.js?v=0.8.0-rc7"></script>
+  <script src="quote-parser.js?v=0.8.0-rc7"></script>
+  <script type="module" src="app.js?v=0.8.0-rc7"></script>
 </body>
 </html>

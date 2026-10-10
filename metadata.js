@@ -1,3 +1,4 @@
+import { queryAppleBooks, appleCandidate, appleMatch } from './apple-books.js?v=0.8.0-rc7';
 // Bookfolio V0.8.0 RC5: German-first catalogue lookup with provider-aware HTTP 429 pause.
 // Requests contain bibliographic information only; no account keys or reading notes.
 const FIELDS = ['cover_url', 'isbn', 'pages', 'published_year', 'language', 'description'];
@@ -305,88 +306,74 @@ async function findAlternateGoogleDescription(book,signal,diagnostics=newDiagnos
 export async function lookupBookMetadata(book, {signal, withVariants = false} = {}) {
   if (!book?.title) return null;
   const diagnostics=newDiagnostics();
-  const isbn = String(book.isbn || '').replace(/[^0-9X]/gi,'');
-  const fields = 'key,title,author_name,cover_i,isbn,number_of_pages_median,first_publish_year,language';
-  const params = new URLSearchParams({title:book.title, limit:'12', fields});
-  if (book.author) params.set('author',leadAuthor(book.author));
-  let [olSearch, googleSearch] = await Promise.all([
-    getJSON(`https://openlibrary.org/search.json?${params}`, signal, diagnostics),
-    getJSON(`https://www.googleapis.com/books/v1/volumes?${new URLSearchParams({q: isbn ? `isbn:${isbn}` : `intitle:${bareTitle(book.title)} ${book.author ? `inauthor:${leadAuthor(book.author)}` : ''}`,maxResults:'20',printType:'books'})}`,signal,diagnostics)
+  const isbn=String(book.isbn||'').replace(/[^0-9X]/gi,'');
+  const fields='key,title,author_name,cover_i,isbn,number_of_pages_median,first_publish_year,language';
+  const olParams=new URLSearchParams({title:book.title,limit:'12',fields});
+  if(book.author)olParams.set('author',leadAuthor(book.author));
+  // One Apple search + one Open Library search first. Google is last resort.
+  const [appleRaw,olInitial]=await Promise.all([
+    queryAppleBooks([bareTitle(book.title),leadAuthor(book.author)].filter(Boolean).join(' '),{signal,diagnostics}),
+    getJSON(`https://openlibrary.org/search.json?${olParams}`,signal,diagnostics)
   ]);
-  // A catalog may only index the FIRST of several authors. Example: a book
-  // stored as "Anfänge — David Wengrow" is cataloged under Graeber & Wengrow.
-  // Validate candidates LOCALLY after querying title-only to avoid false matches.
-  const parseOL = search => (search?.docs||[]).map(workCandidate).map(x=>({...x,score:matchScore(book,x)})).filter(x=>x.score>=.75).sort((a,b)=>b.score-a.score);
-  const parseGB = search => (search?.items||[]).map(volumeCandidate).map(x=>({...x,score:matchScore(book,x)})).filter(x=>x.score>=.75).sort((a,b)=>b.score-a.score);
-
-  let olMatches = parseOL(olSearch), gbMatches = parseGB(googleSearch);
-  // Retry a broader title-only query independently for each catalog that did
-  // not produce a trustworthy match. Keep the same local title/author filter.
-  if (!olMatches.length || !gbMatches.length) {
-    const titleOnly = new URLSearchParams({title:book.title,limit:'30',fields});
-    const googleTitle = new URLSearchParams({q:`intitle:${book.title}`,maxResults:'30',printType:'books'});
-    const [olWide,gbWide] = await Promise.all([
-      olMatches.length ? Promise.resolve(null) : getJSON(`https://openlibrary.org/search.json?${titleOnly}`, signal,diagnostics),
-      gbMatches.length ? Promise.resolve(null) : getJSON(`https://www.googleapis.com/books/v1/volumes?${googleTitle}`,signal,diagnostics)
-    ]);
-    olSearch ||= olWide; googleSearch ||= gbWide;
-    if (!olMatches.length) olMatches = parseOL(olWide);
-    if (!gbMatches.length) gbMatches = parseGB(gbWide);
+  const parseOL=data=>(data?.docs||[]).map(workCandidate).map(c=>({...c,score:matchScore(book,c)})).filter(c=>c.score>=.75).sort((a,b)=>b.score-a.score);
+  const apples=appleRaw.map(appleCandidate).map((c,i)=>({...c,score:appleMatch(book,appleRaw[i])}))
+    .filter(c=>c.score>=.78).sort((a,b)=>b.score-a.score || Number(!!b.description)-Number(!!a.description) || Number(!!b.cover_url)-Number(!!a.cover_url));
+  let olMatches=parseOL(olInitial);
+  if(!olMatches.length){
+    const wide=await getJSON(`https://openlibrary.org/search.json?${new URLSearchParams({title:book.title,limit:'25',fields})}`,signal,diagnostics);
+    olMatches=parseOL(wide);
   }
-  if (!olMatches.length && !gbMatches.length) {
-    // Last chance: general full-text search, useful for punctuation and
-    // multilingual catalog entries where the title field is incomplete.
-    const familyName=norm(book.author).split(' ').filter(Boolean).pop()||'';
-    const q=[book.title,familyName].filter(Boolean).join(' ');
-    const [olWide,gbWide]=await Promise.all([
-      getJSON(`https://openlibrary.org/search.json?${new URLSearchParams({q,limit:'30',fields})}`,signal,diagnostics),
-      getJSON(`https://www.googleapis.com/books/v1/volumes?${new URLSearchParams({q,maxResults:'25',printType:'books'})}`,signal,diagnostics)
-    ]);
-    olSearch ||= olWide;googleSearch ||= gbWide;
-    olMatches=parseOL(olWide);gbMatches=parseGB(gbWide);
+  let bestApple=apples[0]||null,bestOL=olMatches[0]||null,bestGB=null,gbMatches=[];
+  const missingPrimary=!(bestApple?.cover_url||book.cover_url)||!(bestApple?.description||book.description);
+  // Avoid hammering Google Books if Apple has already supplied cover + text.
+  if(missingPrimary){
+    const gParams=new URLSearchParams({q:isbn?`isbn:${isbn}`:[bareTitle(book.title),leadAuthor(book.author)].join(' '),maxResults:'20',printType:'books'});
+    const google=await getJSON(`https://www.googleapis.com/books/v1/volumes?${gParams}`,signal,diagnostics);
+    gbMatches=(google?.items||[]).map(volumeCandidate).map(c=>({...c,score:matchScore(book,c)})).filter(c=>c.score>=.75).sort((a,b)=>b.score-a.score);
+    bestGB=gbMatches[0]||null;
   }
-  if (!olSearch && !googleSearch && catalogUnavailable(diagnostics)) throw unavailableError(diagnostics);
-  let bestOL=olMatches[0]||null,bestGB=gbMatches[0]||null;
-  if (!bestOL && !bestGB) return null;
-  // Search gives the work/edition. Fetch the full work record for its description.
-  let work = null;
-  if (bestOL?.work_key && !book.description) work = await getJSON(`https://openlibrary.org${bestOL.work_key}.json`,signal,diagnostics);
-  const variants = [];
-  const addCover = (url,label='') => {url=safeImage(url);if(url && !variants.some(v=>v.url===url))variants.push({url,label});};
-  addCover(bestOL?.cover_url,'Open Library');
-  addCover(bestGB?.cover_url,'Google Books');
-  for (const x of olMatches.slice(1,5)) addCover(x.cover_url,'Weitere Ausgabe');
-  if (withVariants && bestOL?.work_key) {
-    const editions = await getJSON(`https://openlibrary.org${bestOL.work_key}/editions.json?limit=35`,signal,diagnostics);
-    for(const ed of editions?.entries||[]) {
-      for(const cover of (ed.covers||[]).slice(0,2)) addCover(olCover(cover),year(ed.publish_date)||'Weitere Ausgabe');
+  if(!bestApple&&!bestOL&&!bestGB){
+    if(catalogUnavailable(diagnostics))throw unavailableError(diagnostics);
+    return null;
+  }
+  const variants=[];
+  const addCover=(url,label)=>{url=safeImage(url);if(url&&!variants.some(v=>v.url===url))variants.push({url,label});};
+  for(const c of apples.slice(0,5))addCover(c.cover_url,'Apple Books');
+  addCover(bestOL?.cover_url,'Open Library');addCover(bestGB?.cover_url,'Google Books');
+  for(const c of olMatches.slice(1,5))addCover(c.cover_url,'Andere Ausgabe');
+  if(withVariants&&bestOL?.work_key){
+    const editions=await getJSON(`https://openlibrary.org${bestOL.work_key}/editions.json?limit=25`,signal,diagnostics);
+    for(const ed of editions?.entries||[]){
+      for(const cover of (ed.covers||[]).slice(0,2))addCover(olCover(cover),ed.publish_date||'Andere Ausgabe');
       if(variants.length>=8)break;
     }
   }
-  const fromWork = shortDescription(olDesc(work?.description));
-  // Prefer a German edition even if the ISBN-specific edition has only English
-  // or no description. Open Library work text has no reliable language tag.
-  let chosenDescription = bestDescription(book,gbMatches);
-  if(!book.description && (!chosenDescription || chosenDescription.language!=='Deutsch') && (isGerman(book) || !chosenDescription)) {
-    chosenDescription = await findAlternateGoogleDescription(book,signal,diagnostics,gbMatches) || chosenDescription;
+  let description=bestApple?.description||bestGB?.description||'';
+  let source=bestApple?.description?'Apple Books':bestGB?.description?'Google Books':'';
+  let sourceUrl=bestApple?.description?bestApple.description_source_url:bestGB?.description?bestGB.description_source_url:'';
+  if(!description&&bestOL?.work_key){
+    const work=await getJSON(`https://openlibrary.org${bestOL.work_key}.json`,signal,diagnostics);
+    description=shortDescription(olDesc(work?.description));
+    if(description){source='Open Library';sourceUrl=`https://openlibrary.org${bestOL.work_key}`;}
   }
-  const description=chosenDescription?.description || fromWork;
-  const descSource = chosenDescription ? chosenDescription.description_source : (fromWork ? 'Open Library' : '');
-  const descSourceUrl = chosenDescription ? chosenDescription.description_source_url : (fromWork && bestOL?.work_key ? `https://openlibrary.org${bestOL.work_key}` : '');
+  if(!description&&bestGB){
+    const alt=await findAlternateGoogleDescription(book,signal,diagnostics,gbMatches);
+    if(alt?.description){description=alt.description;source=alt.description_source;sourceUrl=alt.description_source_url;}
+  }
+  const principal=bestApple||bestOL||bestGB;
   return {
-    cover_url:bestOL?.cover_url || bestGB?.cover_url || '',
-    isbn: (isbn && (bestGB?.isbns||[]).some(v=>String(v).replace(/[^0-9X]/gi,'')===isbn)) ? isbn : bestOL?.isbn || bestGB?.isbn || '',
-    pages:bestOL?.pages || bestGB?.pages || null,
-    published_year:bestOL?.published_year || bestGB?.published_year || null,
-    language:book.language||bestOL?.language||bestGB?.language||'',
-    description,description_source:descSource,description_source_url:descSourceUrl,
-    variants:variants.slice(0,8),matched_title:bestOL?.title||bestGB.title,
-    matched_author:bestOL?.author||bestGB.author,confidence:Math.max(bestOL?.score||0,bestGB?.score||0),
-    description_language:chosenDescription?.language||'',
+    cover_url:bestApple?.cover_url||bestOL?.cover_url||bestGB?.cover_url||'',
+    // Do not invent an Apple ISBN. Open Library's ISBN may refer to another edition.
+    isbn:isbn||'',
+    pages:bestOL?.pages||bestGB?.pages||null,
+    published_year:bestOL?.published_year||bestGB?.published_year||bestApple?.published_year||null,
+    language:book.language||bestOL?.language||bestGB?.language||bestApple?.language||'',
+    description,description_source:source,description_source_url:sourceUrl,
+    variants:variants.slice(0,8),matched_title:principal.title,matched_author:principal.author,
+    confidence:principal.score,description_language:source==='Apple Books'?'':bestGB?.language||'',
     description_status:description?'found':diagnostics.errors.length?'request_failed':'not_in_catalog',
     lookup_warnings:diagnostics.errors,
-    lookup_diagnostics:{requests:diagnostics.requests,matches:{openLibrary:olMatches.length,google:gbMatches.length,
-      googleWithDescription:gbMatches.filter(x=>x.description).length}}
+    lookup_diagnostics:{requests:diagnostics.requests,matches:{apple:apples.length,openLibrary:olMatches.length,google:gbMatches.length,googleWithDescription:gbMatches.filter(c=>c.description).length}}
   };
 }
 
@@ -405,57 +392,36 @@ function manualQueryFit(query, candidate) {
   if (!matched) return 0;
   return matched / terms.length + (title.includes(norm(query)) ? .20 : 0) + (authors.includes(norm(query)) ? .12 : 0);
 }
-export async function searchBookCatalog(query, {signal} = {}) {
-  const term = String(query || '').trim().slice(0, 150);
-  if (term.length < 2) return [];
-  const isbn = term.replace(/[^0-9X]/gi, '');
-  const isIsbn = /^\d{10}(?:\d{3})?$/.test(isbn) && /^[\dX\s-]+$/i.test(term);
-  const fields = 'key,title,author_name,cover_i,isbn,number_of_pages_median,first_publish_year,language';
-  const ol = new URLSearchParams({q: isIsbn ? `isbn:${isbn}` : term,fields,limit:'30'});
-  const gb = new URLSearchParams({q: isIsbn ? `isbn:${isbn}` : term,maxResults:'30',printType:'books'});
-  // Open Library supports Solr prefix matching; query a partial single-word name
-  // in parallel rather than relying on Google's spelling correction.
-  const tail=term.match(/[\p{L}]{4,}$/u)?.[0];
-  const prefix = !isIsbn && tail ?
-    new URLSearchParams({q:`${term.slice(0,-tail.length)}${tail}*`,fields,limit:'30'}) : null;
+export async function searchBookCatalog(query,{signal}={}){
+  const term=String(query||'').trim().slice(0,150);
+  if(term.length<2)return [];
+  const isbn=term.replace(/[^0-9X]/gi,'');
+  const isIsbn=/^\d{10}(?:\d{3})?$/.test(isbn)&&/^[\dX\s-]+$/i.test(term);
+  const fields='key,title,author_name,cover_i,isbn,number_of_pages_median,first_publish_year,language';
   const diagnostics=newDiagnostics();
-  const [olData, gbData, prefixData] = await Promise.all([
-    getJSON(`https://openlibrary.org/search.json?${ol}`,signal,diagnostics),
-    getJSON(`https://www.googleapis.com/books/v1/volumes?${gb}`,signal,diagnostics),
-    prefix ? getJSON(`https://openlibrary.org/search.json?${prefix}`,signal,diagnostics) : Promise.resolve(null)
+  const [appleResults,olData]=await Promise.all([
+    isIsbn?Promise.resolve([]):queryAppleBooks(term,{signal,diagnostics}),
+    getJSON(`https://openlibrary.org/search.json?${new URLSearchParams({q:isIsbn?`isbn:${isbn}`:term,fields,limit:'35'})}`,signal,diagnostics)
   ]);
-  if (!olData && !gbData && !prefixData && catalogUnavailable(diagnostics)) throw unavailableError(diagnostics);
-  const all = [];
-  for (const d of [...(olData?.docs || []),...(prefixData?.docs || [])]) {
-    if (!d.title) continue;
-    all.push({
-      source:'Open Library',title:d.title,author:(d.author_name || []).join(', '),authors:d.author_name||[],
-      isbn:d.isbn?.[0]||'',isbns:d.isbn||[],cover_url:olCover(d.cover_i),
-      pages:d.number_of_pages_median||null,published_year:d.first_publish_year||null,
-      language:(d.language||[]).includes('ger')?'Deutsch':(d.language||[]).includes('eng')?'Englisch':'',
-      work_key:/^(?:\/works\/)?OL\d+W$/.test(d.key||'') ? (d.key.startsWith('/')?d.key:`/works/${d.key}`) : ''
-    });
+  const all=appleResults.map(appleCandidate);
+  for(const d of olData?.docs||[]){
+    if(!d.title)continue;
+    all.push({...workCandidate(d),source:'Open Library'});
   }
-  for (const item of gbData?.items || []) {
-    const d=item.volumeInfo||{};
-    if (!d.title) continue;
-    all.push({
-      source:'Google Books',title:d.title,author:(d.authors||[]).join(', '),authors:d.authors||[],
-      isbn:(d.industryIdentifiers||[]).find(x=>x.type==='ISBN_13')?.identifier || (d.industryIdentifiers||[])[0]?.identifier || '',
-      isbns:(d.industryIdentifiers||[]).map(x=>x.identifier),cover_url:safeImage(d.imageLinks?.thumbnail||d.imageLinks?.smallThumbnail),
-      pages:d.pageCount||null,published_year:year(d.publishedDate),language:d.language==='de'?'Deutsch':d.language==='en'?'Englisch':'',
-      description:shortDescription(d.description||''),description_source:'Google Books',description_source_url:safeImage(d.infoLink||''),
-      volume_id:item.id||''
-    });
+  if(!all.length){
+    // Only ask Google when both primary catalogues did not find a candidate.
+    const gData=await getJSON(`https://www.googleapis.com/books/v1/volumes?${new URLSearchParams({q:isIsbn?`isbn:${isbn}`:term,maxResults:'20',printType:'books'})}`,signal,diagnostics);
+    all.push(...(gData?.items||[]).map(volumeCandidate));
   }
-  const unique = new Set();
+  if(!all.length&&catalogUnavailable(diagnostics))throw unavailableError(diagnostics);
+  const unique=new Set();
   return all.map(c=>({...c,relevance:manualQueryFit(term,c)}))
     .filter(c=>c.relevance>0)
-    .sort((a,b)=>b.relevance-a.relevance || Number(!!b.cover_url)-Number(!!a.cover_url))
+    .sort((a,b)=>b.relevance-a.relevance||Number(!!b.description)-Number(!!a.description)||Number(!!b.cover_url)-Number(!!a.cover_url))
     .filter(c=>{
-      const key=c.work_key ? `ol:${c.work_key}` : `${c.source}:${norm(c.title)}:${norm(c.author)}`;
+      const key=c.apple_id?`apple:${c.apple_id}`:c.work_key?`ol:${c.work_key}`:`${c.source}:${norm(c.title)}:${norm(c.author)}`;
       if(unique.has(key))return false;unique.add(key);return true;
-    }).slice(0,18);
+    }).slice(0,24);
 }
 
 // Fetch details ONLY for the result explicitly selected by the user. Never
@@ -494,7 +460,7 @@ export async function lookupSelectedCatalogBook(candidate, {signal} = {}) {
       description_language=detail.language;
     }
   }
-  if (!description || (isGerman(candidate) && description_language==='Englisch')) {
+  if (candidate.source!=='Apple Books' && (!description || (isGerman(candidate) && description_language==='Englisch'))) {
     const otherEdition = await findAlternateGoogleDescription(candidate,signal,diagnostics);
     if (otherEdition && (!description || otherEdition.language==='Deutsch')) {
       description=otherEdition.description;
