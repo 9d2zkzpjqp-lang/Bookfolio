@@ -1,5 +1,5 @@
-import { normalizeBookDescription } from './description-text.js?v=0.8.0-rc8';
-import { queryAppleBooks, appleCandidate, appleMatch } from './apple-books.js?v=0.8.0-rc8';
+import { normalizeBookDescription } from './description-text.js?v=0.8.0-rc10';
+import { queryAppleBooks, appleCandidate, appleMatch } from './apple-books.js?v=0.8.0-rc10';
 // Bookfolio V0.8.0 RC5: German-first catalogue lookup with provider-aware HTTP 429 pause.
 // Requests contain bibliographic information only; no account keys or reading notes.
 const FIELDS = ['cover_url', 'isbn', 'pages', 'published_year', 'language', 'description'];

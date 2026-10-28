@@ -313,3 +313,18 @@ body:has(.sheet.open) .bottom-nav { visibility:hidden; opacity:0; pointer-events
 .summary-text { max-width: 72ch; overflow-wrap: break-word; }
 .apple-add-description p { white-space: pre-line; overflow-wrap: break-word; }
 .metadata-description { overflow-wrap: break-word; }
+
+
+/* RC9: Lesetipps ohne zusätzliche mobile Kartenstapel */
+.book-reviews h3{margin-bottom:10px;}
+.book-review-link{display:flex;align-items:center;justify-content:space-between;gap:14px;text-decoration:none;color:var(--ink);background:rgba(244,238,231,.7);border:1px solid var(--line);border-radius:14px;padding:13px 15px;margin-bottom:13px;transition:background .16s ease,border-color .16s ease;}
+.book-review-link:hover,.book-review-link:focus-visible{background:#f0e6dc;border-color:rgba(139,77,40,.3);}
+.book-review-link strong{display:block;font-size:.88rem;font-weight:650;}
+.book-review-link small{display:block;margin-top:3px;font-size:.76rem;line-height:1.4;color:var(--muted);}
+.book-review-arrow{color:var(--accent);font-size:1.2rem;flex-shrink:0;}
+
+
+/* RC10: press blurbs remain accessible without cluttering the synopsis. */
+.summary-promotional {max-width:72ch; margin: 12px 0 6px; color:var(--muted); font-size:.81rem;}
+.summary-promotional summary {cursor:pointer; color:var(--accent); width:fit-content; line-height:1.5;}
+.summary-promotional p {white-space:pre-line; line-height:1.6; margin:10px 0 0; color:var(--muted);}

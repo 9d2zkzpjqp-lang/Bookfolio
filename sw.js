@@ -1,10 +1,10 @@
-// Bookfolio 0.8.0-rc8: versioned URLs + network-first documents/scripts/styles.
+// Bookfolio 0.8.0-rc10: versioned URLs + network-first documents/scripts/styles.
 // A new index.html must never run with an older metadata.js/app.js.
-const CACHE='bookfolio-v080-rc8';
+const CACHE='bookfolio-v080-rc10';
 const CORE=[
- './','./index.html','./styles.css?v=0.8.0-rc8',
- './app.js?v=0.8.0-rc8','./metadata.js?v=0.8.0-rc8','./apple-books.js?v=0.8.0-rc8','./description-text.js?v=0.8.0-rc8',
- './quote-parser.js?v=0.8.0-rc8','./config.js?v=0.8.0-rc8',
+ './','./index.html','./styles.css?v=0.8.0-rc10',
+ './app.js?v=0.8.0-rc10','./metadata.js?v=0.8.0-rc10','./apple-books.js?v=0.8.0-rc10','./description-text.js?v=0.8.0-rc10',
+ './quote-parser.js?v=0.8.0-rc10','./config.js?v=0.8.0-rc10',
  './manifest.webmanifest','./icon.svg','./icon-180.png','./icon-192.png','./icon-512.png'
 ];
 const SCOPE_PATH=new URL(self.registration.scope).pathname;

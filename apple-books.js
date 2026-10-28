@@ -1,4 +1,4 @@
-import { normalizeBookDescription } from './description-text.js?v=0.8.0-rc8';
+import { normalizeBookDescription } from './description-text.js?v=0.8.0-rc10';
 // Bookfolio RC7 – Apple Books via the public iTunes Search API (JSONP).
 // JSONP is needed for browser/Safari compatibility, including installed PWAs.
 // Queries contain title/author/ISBN search terms only. No Supabase credentials.
